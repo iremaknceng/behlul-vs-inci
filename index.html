@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>Behlul & Inci</title>
 
-  <!-- p5.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 
   <style>
@@ -116,9 +115,9 @@ let scaleFactor = 1;
 const game = { score: 0, lives: 3, level: 1 };
 
 // TIME + BEST TIME
-let startTime = 0;
-let elapsedTime = 0;
-let bestTime = 0; // seconds
+let startTime = 0;     // ms
+let elapsedTime = 0;   // seconds (this run)
+let bestTime = 0;      // seconds (saved)
 const BEST_TIME_KEY = "behlul_best_time_v1";
 
 const TOUCH_X_OFFSET = -14;
@@ -127,20 +126,20 @@ const TOUCH_X_OFFSET = -14;
 let levelUpText = "";
 let levelUpTimer = 0; // ms remaining
 
-// FLIP (ağız bazen ters tarafa açılsın)
-let flipTarget = 0;   // 0 veya PI
-let flipCurrent = 0;  // yumuşak geçiş
-
 // PLAYER
 const player = { x: 0, y: 0, r: 52 };
 
-// SHARK (DEV)
+// SHARK
 const shark = {
   x: 0, y: 0,
   w: 520, h: 520,
-  gapAngle: 0,
-  gapSize: 1.1
+  angle: 0,      // shark’ın genel dönüş açısı
+  gapAngle: 0,   // çarpışma için ağız yönü (angle ile aynı tutuluyor)
+  gapSize: 1.25  // ağız açıklığı (C gibi)
 };
+
+// Level zamanlaması: her 30 saniyede bir artacak
+const LEVEL_EVERY_SECONDS = 30;
 
 function startGame(){
   new p5(p => {
@@ -148,7 +147,7 @@ function startGame(){
       bgImg      = p.loadImage("assets/background.jpg?v=2");
       catImg     = p.loadImage("assets/cat.png?v=2");
       sharkImg   = p.loadImage("assets/shark.png?v=2");
-      levelUpImg = p.loadImage("assets/levelup.png?v=1"); // ✅ level-up görseli
+      levelUpImg = p.loadImage("assets/levelup.png?v=1"); // varsa gösterir
     };
 
     p.setup = () => {
@@ -180,7 +179,7 @@ function startGame(){
       updateGame(p);
       renderGame(p);
       renderHUD(p);
-      renderLevelUpAnim(p); // ✅ LEVEL anim
+      renderLevelUpAnim(p);
     };
 
     p.mousePressed = p.touchStarted = () => {
@@ -219,8 +218,14 @@ function resetAll(p, keepState=false){
   shark.w = shark.h = 520 * scaleFactor;
   shark.x = p.width / 2;
   shark.y = p.height / 2;
-  shark.gapAngle = -0.3;
-  shark.gapSize = 1.1;
+
+  // açılar
+  shark.angle = -0.3;
+  shark.gapAngle = shark.angle;
+
+  // ağız açıklığı (C gibi)
+  // İstersen 1.30 yapabilirsin
+  shark.gapSize = 1.25;
 
   // best time yükle
   bestTime = parseInt(localStorage.getItem(BEST_TIME_KEY) || "0", 10);
@@ -232,10 +237,6 @@ function resetAll(p, keepState=false){
   // level anim reset
   levelUpTimer = 0;
   levelUpText = "";
-
-  // flip reset
-  flipTarget = 0;
-  flipCurrent = 0;
 
   if (!keepState) state = "START";
 }
@@ -255,90 +256,66 @@ function renderBackground(p){
 }
 
 function updateGame(p){
+  // Player follow
   const tx = (p.touches && p.touches.length ? p.touches[0].x : p.mouseX) + TOUCH_X_OFFSET;
   const ty = (p.touches && p.touches.length ? p.touches[0].y : p.mouseY);
 
   player.x = lerp(player.x, clamp(tx, player.r, p.width - player.r), 0.25);
   player.y = lerp(player.y, clamp(ty, player.r, p.height - player.r), 0.25);
 
-  // TIME
+  // Time
   elapsedTime = Math.floor((p.millis() - startTime) / 1000);
 
-  // score/level
-  game.score += 1;
+  // Level: every 30 seconds
+  const newLevel = Math.floor(elapsedTime / LEVEL_EVERY_SECONDS) + 1;
+  if (newLevel !== game.level) {
+    game.level = newLevel;
 
-  const prevLevel = game.level;
-  if (game.score % 900 === 0) game.level += 1;
-
-  // ✅ level-up anim başlat: LEVEL 2 / LEVEL 3 ...
-  if (game.level !== prevLevel) {
+    // Level up anim
     levelUpText = `LEVEL ${game.level}!`;
     levelUpTimer = 1100;
   }
 
-  // süreye göre zorluk
-  const timeDifficulty = Math.floor(elapsedTime / 20);
+  // Score (isteğe bağlı): süreye göre artan skor (her saniye 10 puan)
+  // FPS’e bağlı olmasın diye böyle yaptım.
+  game.score = elapsedTime * 10;
 
-  // --------------------
-  // 🦈 AĞIZ GENİŞLİĞİ (C gibi) + alt-üst oynama
-  // --------------------
-  const baseGap = 1.30;
-  const gapByLevel = (game.level - 1) * 0.045;
-  const gapByTime  = timeDifficulty * 0.025;
+  // Shark rotation direction: level odd -> clockwise, even -> counterclockwise
+  const dir = (game.level % 2 === 1) ? 1 : -1;
 
-  const waveSpeed = 0.015 + game.level * 0.002;
-  const waveAmp   = 0.10 + game.level * 0.015;
-  const wave      = Math.sin(p.millis() * waveSpeed) * waveAmp;
+  // Speed: start slow, increase with level
+  const baseSpeed = 0.008;           // başlangıç yavaş
+  const speedPerLevel = 0.0035;      // level arttıkça hız artar
+  const rotSpeed = (baseSpeed + (game.level - 1) * speedPerLevel) * dir;
 
-  // --------------------
-  // 😈 HIGH LEVEL: aniden küçülüp büyüme (bite/pulse)
-  // --------------------
-  let biteFactor = 1.0;
-  if (game.level >= 4) {
-    const bitePeriod = 5500;
-    const biteWindow = 380;
-    const phase = p.millis() % bitePeriod;
-    if (phase < biteWindow) {
-      biteFactor = 0.65; // daha dar anlık
-    }
+  shark.angle += rotSpeed;
+  shark.gapAngle = shark.angle; // çarpışma aynı yönle dönsün
+
+  // (İstersen level arttıkça ağız biraz daralsın — şimdilik sabit bıraktım)
+  // shark.gapSize = Math.max(0.70, 1.25 - (game.level - 1) * 0.05);
+
+  // Level anim timer azalt
+  if (levelUpTimer > 0) {
+    levelUpTimer = Math.max(0, levelUpTimer - (1000/60));
   }
 
-  // --------------------
-  // 🦈 Bazen ters tarafa açılma (0 veya PI)
-  // --------------------
-  const flipBucket = Math.floor(p.millis() / 7000) % 3; // 2 normal + 1 ters
-  flipTarget = (flipBucket === 2) ? Math.PI : 0;
-  flipCurrent = lerp(flipCurrent, flipTarget, 0.06);
-
-  // --------------------
-  // 🌀 DÖNÜŞ + YÖN SALINIMI + TERS
-  // --------------------
-  const baseTurn = 0.02 + (game.level * 0.002) + (timeDifficulty * 0.0015);
-  shark.gapAngle += baseTurn;
-  shark.gapAngle += Math.sin(p.millis() * 0.002) * (0.015 + game.level * 0.002);
-  shark.gapAngle += flipCurrent;
-
-  // final gap
-  let gap = (baseGap - gapByLevel - gapByTime + wave) * biteFactor;
-  shark.gapSize = Math.max(0.70, gap);
-
-  // anim timer düşür (fps bağımsız küçük yaklaşım)
-  if (levelUpTimer > 0) levelUpTimer = Math.max(0, levelUpTimer - (1000/60));
-
+  // Collision
   if (isCollidingWithSharkMouth(player.x, player.y, player.r)) {
     loseLife();
   }
 }
 
 function renderGame(p){
+  // shark
   if (sharkImg) {
     p.push();
     p.translate(shark.x, shark.y);
-    p.rotate(shark.gapAngle);
+    p.rotate(shark.angle);
     p.image(sharkImg, 0, 0, shark.w, shark.h);
     p.pop();
   }
 
+  // cat
   if (catImg) {
     const catSize = 160 * scaleFactor;
     p.image(catImg, player.x, player.y, catSize, catSize);
@@ -346,23 +323,7 @@ function renderGame(p){
 }
 
 function renderHUD(p){
-  const hue = (game.level * 35) % 360;
-  const col = hslToRgbCss(hue, 90, 60);
-
-  const p5 = window; // (sadece isim çakışmasın diye)
-  // p5 değişkenini kullanmıyoruz, sadece not: p burada p5 instance
-
-  // p5 instance erişimi: renderHUD(p) parametresi zaten var
-  // (Bu satır sadece yanlışlık olmasın diye; istersen silebilirsin.)
-
-  // HUD
-  // (p burada p5 instance)
-  // Altın renk değil; level'e göre renk değişiyor (sen istemiştin)
-  // Level up yazısı altın & glow.
-  // HUD için de altın istersen söyle.
-}
-
-function renderHUD(p){
+  // Level arttıkça HUD rengi değişsin
   const hue = (game.level * 35) % 360;
   const col = hslToRgbCss(hue, 90, 60);
 
@@ -398,7 +359,6 @@ function renderLevelUpAnim(p){
   p.push();
   p.translate(p.width/2, p.height/2);
 
-  // glow'lu görsel
   if (levelUpImg) {
     ctx.save();
     ctx.shadowBlur = glowStrength;
@@ -473,7 +433,7 @@ function loseLife(){
 }
 
 /* ==========================
-   COLLISION
+   COLLISION (ağız açıklığına göre)
    ========================== */
 function isCollidingWithSharkMouth(px, py, pr){
   const dx = px - shark.x;
@@ -548,4 +508,5 @@ function lerp(a, b, t){ return a + (b - a) * t; }
 
 </body>
 </html>
+
 
