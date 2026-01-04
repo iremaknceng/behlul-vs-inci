@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Behlül vs İnci</title>
+
+  <!-- p5.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+
+  <style>
+    html, body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
+    canvas { display:block; touch-action:none; }
+
+    /* Intro layer */
+    #introOverlay{
+      position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+      background:#000; z-index:10;
+    }
+    #introVideo{
+      width:100%; height:100%; object-fit:cover; background:#000;
+    }
+    #tapToStart{
+      position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+      z-index:11;
+      padding:14px 18px;
+      border-radius:14px;
+      background:rgba(0,0,0,0.55);
+      border:1px solid rgba(255,255,255,0.25);
+      color:#fff;
+      font:600 16px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      letter-spacing:0.2px;
+      backdrop-filter: blur(6px);
+      cursor:pointer;
+      user-select:none;
+      text-align:center;
+    }
+    #tapHint{
+      display:block;
+      opacity:0.9;
+      font-weight:500;
+      margin-top:6px;
+      font-size:13px;
+    }
+    #tapToStart.hidden, #introOverlay.hidden { display:none; }
+  </style>
+</head>
+<body>
+
+  <!-- INTRO (video + tap to start) -->
+  <div id="introOverlay">
+    <video id="introVideo" playsinline preload="auto">
+      <source src="assets/intro.mp4" type="video/mp4" />
+    </video>
+    <div id="tapToStart">
+      Başlamak için dokun / tıkla
+      <span id="tapHint">(Video sesli oynasın diye gerekli)</span>
+    </div>
+  </div>
+
+  <script>
+    /***********************
+     *  CONFIG (ASSETS)
+     ***********************/
+    const ASSETS = {
+      background: "assets/background.jpg",
+      cat: "assets/cat.png",
+      shark: "assets/shark.png"
+    };
+
+    /***********************
+     *  INTRO LOGIC
+     ***********************/
+    const introOverlay = document.getElementById("introOverlay");
+    const introVideo   = document.getElementById("introVideo");
+    const tapToStart   = document.getElementById("tapToStart");
+
+    let gameStarted = false;
+
+    function startIntroPlayback() {
+      // Mobile audio unlock: must be user gesture
+      tapToStart.classList.add("hidden");
+
+      // Try to play with sound
+      introVideo.muted = false;
+      const p = introVideo.play();
+
+      if (p && typeof p.then === "function") {
+        p.then(() => {
+          // playing
+        }).catch(() => {
+          // If browser blocks sound, fallback: play muted (still lets you proceed)
+          introVideo.muted = true;
+          introVideo.play().catch(() => {});
+        });
+      }
+    }
+
+    function startGame() {
+      if (gameStarted) return;
+      gameStarted = true;
+
+      introOverlay.classList.add("hidden");
+      // ensure video stopped
+      introVideo.pause();
+      introVideo.currentTime = 0;
+
+      // now p5 draw loop continues normally
+      state = State.START;
+    }
+
+    tapToStart.addEventListener("click", () => {
+      startIntroPlayback();
+    });
+
+    tapToStart.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      startIntroPlayback();
+    }, { passive:false });
+
+    // When intro ends, start game
+    introVideo.addEventListener("ended", () => {
+      startGame();
+    });
+
+    // If user clicks video area too
+    introOverlay.addEventListener("click", (e) => {
+      // If they click anywhere, try start intro first
+      if (!gameStarted && !tapToStart.classList.contains("hidden")) {
+        startIntroPlayback();
+      }
+    });
+
+    /***********************
+     *  P5 GAME
+     ***********************/
+    let bgImg, catImg, sharkImg;
+
+    const State = {
+      INTRO: "INTRO",
+      START: "START",
+      PLAY: "PLAY",
+      GAMEOVER: "GAMEOVER"
+    };
+    let state = State.INTRO;
+
+    let score = 0;
+    let lives = 3;
+    let level = 1;
+
+    // ring/shark params
+    let rotation = 0;
+    let rotationSpeed = 0.02; // base speed
+    let gapRatio = 0.20;      // 20% gap (like old ring)
+    let lastPassFrame = -9999;
+
+    // cat (cursor/finger) offset (2mm-ish left)
+    // 2mm on 96dpi ~ 7.5px. We'll use 10px for visibility.
+    const CAT_OFFSET_X = -10;  // << "2mm solda" isteği
+
+    function preload() {
+      // Load images (background + cat + shark mouth)
+      bgImg = loadImage(ASSETS.background);
+      catImg = loadImage(ASSETS.cat);
+      sharkImg = loadImage(ASSETS.shark);
+    }
+
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+      frameRate(60);
+      noCursor(); // nicer on desktop
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
+
+    function touchStarted() {
+      // If intro already ended but overlay didn't hide for some reason
+      if (!gameStarted && introOverlay && !introOverlay.classList.contains("hidden")) return false;
+
+      if (state === State.START) {
+        resetRun();
+        state = State.PLAY;
+      } else if (state === State.GAMEOVER) {
+        resetAll();
+        state = State.START;
+      }
+      return false;
+    }
+
+    function mousePressed() {
+      // same behavior desktop
+      if (!gameStarted && introOverlay && !introOverlay.classList.contains("hidden")) return;
+
+      if (state === State.START) {
+        resetRun();
+        state = State.PLAY;
+      } else if (state === State.GAMEOVER) {
+        resetAll();
+        state = State.START;
+      }
+    }
+
+    function resetAll() {
+      score = 0;
+      lives = 3;
+      level = 1;
+      rotationSpeed = 0.02;
+      gapRatio = 0.20;
+      lastPassFrame = -9999;
+    }
+
+    function resetRun() {
+      // restart just the "attempt" feel if you want (keep score/level)
+      lastPassFrame = frameCount;
+    }
+
+    function drawBackground() {
+      if (bgImg) {
+        // cover
+        const cw = width, ch = height;
+        const iw = bgImg.width, ih = bgImg.height;
+        const scale = Math.max(cw/iw, ch/ih);
+        const dw = iw * scale;
+        const dh = ih * scale;
+        image(bgImg, (cw-dw)/2, (ch-dh)/2, dw, dh);
+      } else {
+        background(0);
+      }
+      // slight dark overlay for readability
+      push();
+      noStroke();
+      fill(0, 120);
+      rect(0, 0, width, height);
+      pop();
+    }
+
+    function getPointer() {
+      // Use touches if available, else mouse
+      let x = mouseX, y = mouseY;
+
+      if (touches && touches.length > 0) {
+        x = touches[0].x;
+        y = touches[0].y;
+      }
+
+      // apply offset so finger doesn't cover cat
+      x += CAT_OFFSET_X;
+
+      // clamp inside screen
+      x = constrain(x, 0, width);
+      y = constrain(y, 0, height);
+      return {x, y};
+    }
+
+    function drawHUD() {
+      push();
+      resetMatrix();
+      fill(255);
+      textSize(20);
+      textAlign(LEFT, TOP);
+      text(`Score: ${score}`, 16, 14);
+      text(`Lives: ${lives}`, 16, 44);
+      text(`Level: ${level}`, 16, 74);
+
+      if (state === State.START) {
+        textSize(30);
+        textAlign(CENTER, CENTER);
+        text("Behlül vs İnci", width/2, height*0.40);
+        textSize(18);
+        text("Tap/Click to Start", width/2, height*0.48);
+        textSize(14);
+        text("Goal: Move the cat head through the shark's open mouth (gap).", width/2, height*0.53);
+      }
+
+      if (state === State.GAMEOVER) {
+        textSize(36);
+        textAlign(CENTER, CENTER);
+        text("GAME OVER", width/2, height*0.42);
+        textSize(18);
+        text("Tap/Click to Restart", width/2, height*0.50);
+      }
+      pop();
+    }
+
+    function drawCat(x, y, sizePx) {
+      if (!catImg) {
+        // fallback: white circle
+        push();
+        noStroke();
+        fill(255);
+        ellipse(x, y, sizePx, sizePx);
+        pop();
+        return;
+      }
+      push();
+      imageMode(CENTER);
+      image(catImg, x, y, sizePx, sizePx);
+      pop();
+    }
+
+    function drawSharkMouth(cx, cy, diameter, rot) {
+      // shark image should be a mouth ring-like graphic centered
+      push();
+      translate(cx, cy);
+      rotate(rot);
+      imageMode(CENTER);
+      if (sharkImg) {
+        image(sharkImg, 0, 0, diameter, diameter);
+      } else {
+        // fallback: draw ring arc
+        noFill();
+        stroke(255);
+        strokeWeight(8);
+        arc(0, 0, diameter, diameter, 0, TWO_PI * (1 - gapRatio));
+      }
+      pop();
+    }
+
+    function updateDifficulty() {
+      // increase difficulty slowly with score
+      // every 5 points: faster + slightly smaller gap
+      const targetLevel = 1 + Math.floor(score / 5);
+      if (targetLevel !== level) {
+        level = targetLevel;
+        rotationSpeed = 0.02 + (level - 1) * 0.004; // speed up
+        gapRatio = max(0.10, 0.20 - (level - 1) * 0.01); // reduce gap to min 10%
+      }
+    }
+
+    function checkPassThroughGap(catX, catY, cx, cy, radius, catR, rot) {
+      // Cat polar position around center
+      const dx = catX - cx;
+      const dy = catY - cy;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      let ang = Math.atan2(dy, dx);
+      if (ang < 0) ang += TWO_PI;
+
+      // Convert to "mouth local angle" by subtracting rotation
+      let local = (ang - rot) % TWO_PI;
+      if (local < 0) local += TWO_PI;
+
+      // We treat "gap" as the missing arc part at the end of circle:
+      // Closed part spans [0, 2π*(1-gapRatio)]
+      const closedEnd = TWO_PI * (1 - gapRatio);
+      const inGap = local > closedEnd && local < TWO_PI;
+
+      // near ring radius
+      const near = Math.abs(dist - radius) < (catR + 6);
+
+      return inGap && near;
+    }
+
+    function draw() {
+      // If intro overlay is visible, keep p5 running but show nothing special
+      if (!gameStarted) {
+        // keep canvas black behind video
+        background(0);
+        return;
+      }
+
+      drawBackground();
+
+      const cx = width / 2;
+      const cy = height / 2;
+
+      // size based on screen
+      const base = Math.min(width, height);
+      const ringRadius = base * 0.22;      // radius
+      const ringDiameter = ringRadius * 2; // diameter
+
+      // Cat size
+      const catSize = base * 0.10;
+      const catR = catSize / 2;
+
+      // pointer
+      const p = getPointer();
+      const catX = p.x;
+      const catY = p.y;
+
+      if (state === State.PLAY) {
+        rotation += rotationSpeed;
+        updateDifficulty();
+
+        // check gap pass (debounce)
+        const ok = checkPassThroughGap(catX, catY, cx, cy, ringRadius, catR, rotation);
+        if (ok && frameCount - lastPassFrame > 25) {
+          score += 1;
+          lastPassFrame = frameCount;
+        }
+
+        // collision with "closed" mouth area:
+        // If near ring BUT NOT in gap -> lose life
+        const dx = catX - cx;
+        const dy = catY - cy;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        const near = Math.abs(dist - ringRadius) < (catR + 6);
+
+        // recompute local angle for "inGap"
+        let ang = Math.atan2(dy, dx); if (ang < 0) ang += TWO_PI;
+        let local = (ang - rotation) % TWO_PI; if (local < 0) local += TWO_PI;
+        const closedEnd = TWO_PI * (1 - gapRatio);
+        const inGap = local > closedEnd && local < TWO_PI;
+
+        if (near && !inGap && frameCount - lastPassFrame > 10) {
+          lives -= 1;
+          lastPassFrame = frameCount; // reuse as hit cooldown
+          if (lives <= 0) {
+            state = State.GAMEOVER;
+          }
+        }
+      }
+
+      // Draw shark mouth (acts like ring)
+      drawSharkMouth(cx, cy, ringDiameter * 1.25, rotation);
+
+      // Draw cat head on top
+      drawCat(catX, catY, catSize);
+
+      // HUD
+      drawHUD();
+    }
+
+    // If intro video fails to autoplay after tap, allow skipping
+    introVideo.addEventListener("error", () => {
+      // Start game anyway
+      startGame();
+    });
+
+    // optional: allow double tap to skip intro
+    let lastTapTime = 0;
+    introOverlay.addEventListener("touchstart", (e) => {
+      const now = Date.now();
+      if (now - lastTapTime < 350) {
+        // double tap
+        startGame();
+      }
+      lastTapTime = now;
+    }, { passive:true });
+
+  </script>
+</body>
+</html>
