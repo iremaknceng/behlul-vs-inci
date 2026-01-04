@@ -105,7 +105,11 @@ tryPlayIntro();
    1) GAME (p5.js)
    ========================== */
 let bgImg, catImg, sharkImg, levelUpImg;
-let levelUpSound;
+
+// 🔊 Sounds
+let levelUpSound; // assets/levelup.mp3
+let pingSound;    // assets/ping.mp3
+let hitSound;     // assets/hit.mp3
 
 let state = "START"; // START, PLAYING, GAMEOVER
 let scaleFactor = 1;
@@ -126,6 +130,7 @@ let levelUpTimer = 0; // ms remaining
 
 // PLAYER
 const player = { x: 0, y: 0, r: 52 };
+let CAT_SIZE = 160; // resetAll'da scale ile ayarlanacak
 
 // SHARK
 const shark = {
@@ -137,12 +142,9 @@ const shark = {
 };
 
 /* ==========================
-   ✅ NEW SCORE RULES
+   SCORE RULES (TARGET)
    ========================== */
-// Nokta (shark merkezinde)
-let TARGET_R = 10;           // px -> resetAll'da scale ile ayarlanacak
-
-// Ring içine girince "hak" açılır, nokta 1 kere dokununca +10
+let TARGET_R = 10; // resetAll'da scale ile ayarlanacak
 let inRing = false;
 let scoredThisEntry = false;
 
@@ -154,9 +156,15 @@ function startGame(){
       sharkImg   = p.loadImage("assets/shark.png?v=2");
       levelUpImg = p.loadImage("assets/levelup.png?v=1");
 
-      // 🔊 Level up sesi (assets/levelup.mp3)
+      // 🔊 Sounds (dosya adları birebir böyle olmalı)
       levelUpSound = new Audio("assets/levelup.mp3");
       levelUpSound.volume = 0.8;
+
+      pingSound = new Audio("assets/ping.mp3");
+      pingSound.volume = 0.9;
+
+      hitSound = new Audio("assets/hit.mp3");
+      hitSound.volume = 0.9;
     };
 
     p.setup = () => {
@@ -185,7 +193,7 @@ function startGame(){
 
       updateGame(p);
       renderGame(p);
-      renderCenterTarget(p); // ✅ nokta çiz
+      renderCenterTarget(p);
       renderHUD(p);
       renderLevelUpAnim(p);
     };
@@ -218,7 +226,10 @@ function resetAll(p, keepState=false){
   game.lives = 3;
   game.level = 1;
 
-  player.r = 52 * scaleFactor;
+  // Cat boyutu + radius (✅ “cat’in herhangi bir zerresi” için)
+  CAT_SIZE = 160 * scaleFactor;
+  player.r = CAT_SIZE * 0.55; // biraz affetmeli (0.5 da olur)
+
   player.x = p.width * 0.25;
   player.y = p.height * 0.5;
 
@@ -230,8 +241,8 @@ function resetAll(p, keepState=false){
   shark.gapAngle = shark.angle;
   shark.gapSize = 1.25;
 
-  // merkez nokta boyutu
-  TARGET_R = 10 * scaleFactor;
+  // Target boyutu (biraz büyük -> daha iyi his)
+  TARGET_R = 18 * scaleFactor;
 
   bestTime = parseInt(localStorage.getItem(BEST_TIME_KEY) || "0", 10);
 
@@ -241,7 +252,7 @@ function resetAll(p, keepState=false){
   levelUpTimer = 0;
   levelUpText = "";
 
-  // ✅ score state reset
+  // Score state reset
   inRing = false;
   scoredThisEntry = false;
 
@@ -273,26 +284,29 @@ function updateGame(p){
   // Time
   elapsedTime = Math.floor((p.millis() - startTime) / 1000);
 
-  // ✅ Ring entry/exit
+  // Ring entry/exit
   const insideRingNow = isInsideRing(player.x, player.y, player.r);
 
-  // Ring'e GİRİNCE: yeni hak aç, tekrar puan alınabilir hale getir
   if (!inRing && insideRingNow) {
     inRing = true;
     scoredThisEntry = false;
   }
-
-  // Ring'den ÇIKINCA: bir sonraki tur için reset
   if (inRing && !insideRingNow) {
     inRing = false;
     scoredThisEntry = false;
   }
 
-  // ✅ Puan: sadece ring içindeyken ve noktaya 1 kere dokununca
+  // ✅ Score only: Ring içindeyken target'a 1 kere dokununca +10
   if (inRing && !scoredThisEntry) {
     if (isTouchingTarget(player.x, player.y, player.r)) {
       addScore(10);
-      scoredThisEntry = true; // bu girişte 1 kere
+      scoredThisEntry = true;
+
+      // 🔔 PING sesi
+      if (pingSound) {
+        pingSound.currentTime = 0;
+        pingSound.play().catch(() => {});
+      }
     }
   }
 
@@ -304,6 +318,7 @@ function updateGame(p){
     levelUpText = `LEVEL ${game.level}!`;
     levelUpTimer = 1500;
 
+    // 🆙 Level up sesi
     if (levelUpSound) {
       levelUpSound.currentTime = 0;
       levelUpSound.play().catch(() => {});
@@ -337,6 +352,7 @@ function addScore(n){
 }
 
 function renderGame(p){
+  // shark
   if (sharkImg) {
     p.push();
     p.translate(shark.x, shark.y);
@@ -345,31 +361,31 @@ function renderGame(p){
     p.pop();
   }
 
+  // cat
   if (catImg) {
-    const catSize = 160 * scaleFactor;
-    p.image(catImg, player.x, player.y, catSize, catSize);
+    p.image(catImg, player.x, player.y, CAT_SIZE, CAT_SIZE);
   }
 }
 
-/* ✅ Merkez nokta çizimi */
 function renderCenterTarget(p){
   p.push();
 
-  // ring içindeyken daha belirgin, dışarıdayken daha hafif
-  const a = inRing ? 220 : 120;
-
-  // glow
   const ctx = p.drawingContext;
   ctx.save();
   ctx.shadowBlur = 18 * scaleFactor;
   ctx.shadowColor = `rgba(255,255,255,${inRing ? 0.7 : 0.35})`;
 
+  // hedefe dokunuyorsa yeşil göster (debug değil, feedback)
+  const touching = (inRing && !scoredThisEntry && isTouchingTarget(player.x, player.y, player.r));
+
   p.noStroke();
-  p.fill(255, 255, 255, a);
+  if (touching) p.fill(0, 255, 120, 230);
+  else p.fill(255, 255, 255, inRing ? 200 : 120);
+
   p.circle(shark.x, shark.y, TARGET_R * 2);
 
-  // iç nokta
-  p.fill(255, 215, 0, a);
+  // iç nokta (altın)
+  p.fill(255, 215, 0, inRing ? 200 : 120);
   p.circle(shark.x, shark.y, TARGET_R * 0.9);
 
   ctx.restore();
@@ -469,6 +485,12 @@ function loseLife(){
   if (loseLife._lock) return;
   loseLife._lock = true;
 
+  // 🔥 yanma sesi
+  if (hitSound) {
+    hitSound.currentTime = 0;
+    hitSound.play().catch(() => {});
+  }
+
   game.lives -= 1;
   setTimeout(() => { loseLife._lock = false; }, 500);
 
@@ -495,13 +517,12 @@ function isInsideRing(px, py, pr){
   return (dist + pr >= innerR) && (dist - pr <= outerR);
 }
 
-// ✅ Merkez noktaya dokunma (ring içindeyken çağrılıyor)
 function isTouchingTarget(px, py, pr){
   const dx = px - shark.x;
   const dy = py - shark.y;
   const dist = Math.sqrt(dx*dx + dy*dy);
 
-  // cat çarpışma yarıçapı + target yarıçapı
+  // ✅ cat’in herhangi bir zerresi target’a değerse
   return dist <= (pr + TARGET_R);
 }
 
@@ -522,6 +543,8 @@ function isCollidingWithSharkMouth(px, py, pr){
   const a1 = normalizeAngle(shark.gapAngle + shark.gapSize/2);
 
   const inGap = isAngleBetween(ang, a0, a1);
+
+  // Gap dışındaysa çarpışma
   return !inGap;
 }
 
@@ -578,6 +601,7 @@ function lerp(a, b, t){ return a + (b - a) * t; }
 
 </body>
 </html>
+
 
 
 
