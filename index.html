@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>Behlul & Inci</title>
 
-  <!-- p5.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 
   <style>
@@ -17,7 +16,6 @@
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     }
 
-    /* INTRO */
     #introWrap{
       position:fixed;
       inset:0;
@@ -34,7 +32,6 @@
       background:#000;
     }
 
-    /* “İzlemek için dokunun ▶” */
     #tapToStart{
       position:absolute;
       top:50%;
@@ -62,7 +59,6 @@
 
 <body>
 
-  <!-- INTRO (sesli) -->
   <div id="introWrap">
     <video id="introVideo" playsinline preload="auto">
       <source src="assets/intro.mp4?v=2" type="video/mp4" />
@@ -126,7 +122,7 @@ const TOUCH_X_OFFSET = -14;
 
 // LEVEL UP ANIM
 let levelUpText = "";
-let levelUpTimer = 0; // ms remaining  ✅ 1500ms yapılacak
+let levelUpTimer = 0; // ms remaining
 
 // PLAYER
 const player = { x: 0, y: 0, r: 52 };
@@ -135,14 +131,20 @@ const player = { x: 0, y: 0, r: 52 };
 const shark = {
   x: 0, y: 0,
   w: 520, h: 520,
-  angle: 0,      // görsel dönüş
-  gapAngle: 0,   // çarpışma için ağız yönü
-  gapSize: 1.25  // ağız açıklığı (C gibi)
+  angle: 0,
+  gapAngle: 0,
+  gapSize: 1.25
 };
 
-// Score’u FPS’e bağlı olmaması için delta-time ile artır
-let lastMs = 0;
-let scoreFloat = 0;
+/* ==========================
+   ✅ NEW SCORE RULES
+   ========================== */
+// Nokta (shark merkezinde)
+let TARGET_R = 10;           // px -> resetAll'da scale ile ayarlanacak
+
+// Ring içine girince "hak" açılır, nokta 1 kere dokununca +10
+let inRing = false;
+let scoredThisEntry = false;
 
 function startGame(){
   new p5(p => {
@@ -150,9 +152,9 @@ function startGame(){
       bgImg      = p.loadImage("assets/background.jpg?v=2");
       catImg     = p.loadImage("assets/cat.png?v=2");
       sharkImg   = p.loadImage("assets/shark.png?v=2");
-      levelUpImg = p.loadImage("assets/levelup.png?v=1"); // ✅ level-up görseli
+      levelUpImg = p.loadImage("assets/levelup.png?v=1");
 
-      // 🔊 Level up sesi (assets/levelup.mp3 ekle)
+      // 🔊 Level up sesi (assets/levelup.mp3)
       levelUpSound = new Audio("assets/levelup.mp3");
       levelUpSound.volume = 0.8;
     };
@@ -176,17 +178,16 @@ function startGame(){
         renderOverlay(p, false);
         return;
       }
-
       if (state === "GAMEOVER") {
         renderOverlay(p, true);
         return;
       }
 
-      // PLAYING
       updateGame(p);
       renderGame(p);
+      renderCenterTarget(p); // ✅ nokta çiz
       renderHUD(p);
-      renderLevelUpAnim(p); // ✅ 1.5 sn gösterim
+      renderLevelUpAnim(p);
     };
 
     p.mousePressed = p.touchStarted = () => {
@@ -194,16 +195,12 @@ function startGame(){
         startTime = p.millis();
         elapsedTime = 0;
 
-        lastMs = p.millis();
-        scoreFloat = 0;
-
         levelUpTimer = 0;
         levelUpText = "";
 
         state = "PLAYING";
         return false;
       }
-
       if (state === "GAMEOVER") {
         resetAll(p);
         state = "START";
@@ -221,9 +218,6 @@ function resetAll(p, keepState=false){
   game.lives = 3;
   game.level = 1;
 
-  scoreFloat = 0;
-  lastMs = p.millis();
-
   player.r = 52 * scaleFactor;
   player.x = p.width * 0.25;
   player.y = p.height * 0.5;
@@ -234,20 +228,22 @@ function resetAll(p, keepState=false){
 
   shark.angle = -0.3;
   shark.gapAngle = shark.angle;
-
-  // C gibi ağız
   shark.gapSize = 1.25;
 
-  // best time yükle
+  // merkez nokta boyutu
+  TARGET_R = 10 * scaleFactor;
+
   bestTime = parseInt(localStorage.getItem(BEST_TIME_KEY) || "0", 10);
 
-  // time reset
   startTime = p.millis();
   elapsedTime = 0;
 
-  // level anim reset
   levelUpTimer = 0;
   levelUpText = "";
+
+  // ✅ score state reset
+  inRing = false;
+  scoredThisEntry = false;
 
   if (!keepState) state = "START";
 }
@@ -277,56 +273,70 @@ function updateGame(p){
   // Time
   elapsedTime = Math.floor((p.millis() - startTime) / 1000);
 
-  // Score: delta-time ile artar (FPS bağımsız)
-  const now = p.millis();
-  const dt = Math.min(60, Math.max(0, now - lastMs)); // ms clamp
-  lastMs = now;
+  // ✅ Ring entry/exit
+  const insideRingNow = isInsideRing(player.x, player.y, player.r);
 
-  // skor hızı: saniyede ~35 puan (istersen değiştir)
-  const scoreRatePerSec = 35;
-  scoreFloat += (dt / 1000) * scoreRatePerSec;
-  game.score = Math.floor(scoreFloat);
+  // Ring'e GİRİNCE: yeni hak aç, tekrar puan alınabilir hale getir
+  if (!inRing && insideRingNow) {
+    inRing = true;
+    scoredThisEntry = false;
+  }
+
+  // Ring'den ÇIKINCA: bir sonraki tur için reset
+  if (inRing && !insideRingNow) {
+    inRing = false;
+    scoredThisEntry = false;
+  }
+
+  // ✅ Puan: sadece ring içindeyken ve noktaya 1 kere dokununca
+  if (inRing && !scoredThisEntry) {
+    if (isTouchingTarget(player.x, player.y, player.r)) {
+      addScore(10);
+      scoredThisEntry = true; // bu girişte 1 kere
+    }
+  }
 
   // Level: her 100 score'da artar
   const newLevel = Math.floor(game.score / 100) + 1;
   if (newLevel !== game.level) {
     game.level = newLevel;
 
-    // Level up anim (1.5 sn)
     levelUpText = `LEVEL ${game.level}!`;
     levelUpTimer = 1500;
 
-    // 🔊 Level up sesi
     if (levelUpSound) {
       levelUpSound.currentTime = 0;
       levelUpSound.play().catch(() => {});
     }
   }
 
-  // Shark rotation direction: odd->clockwise, even->counterclockwise
+  // Shark rotation: tek level saat yönü, çift level ters
   const dir = (game.level % 2 === 1) ? 1 : -1;
 
-  // Speed: start slow, increase with level
-  const baseSpeed = 0.008;       // başlangıç yavaş
-  const speedPerLevel = 0.0035;  // level arttıkça hız
+  // Level arttıkça hız artsın (başta yavaş)
+  const baseSpeed = 0.008;
+  const speedPerLevel = 0.0035;
   const rotSpeed = (baseSpeed + (game.level - 1) * speedPerLevel) * dir;
 
   shark.angle += rotSpeed;
   shark.gapAngle = shark.angle;
 
-  // Level anim timer azalt (basit)
+  // Level anim timer azalt
   if (levelUpTimer > 0) {
     levelUpTimer = Math.max(0, levelUpTimer - (1000/60));
   }
 
-  // Collision
+  // Collision (yanma)
   if (isCollidingWithSharkMouth(player.x, player.y, player.r)) {
     loseLife();
   }
 }
 
+function addScore(n){
+  game.score += n;
+}
+
 function renderGame(p){
-  // shark
   if (sharkImg) {
     p.push();
     p.translate(shark.x, shark.y);
@@ -335,15 +345,38 @@ function renderGame(p){
     p.pop();
   }
 
-  // cat
   if (catImg) {
     const catSize = 160 * scaleFactor;
     p.image(catImg, player.x, player.y, catSize, catSize);
   }
 }
 
+/* ✅ Merkez nokta çizimi */
+function renderCenterTarget(p){
+  p.push();
+
+  // ring içindeyken daha belirgin, dışarıdayken daha hafif
+  const a = inRing ? 220 : 120;
+
+  // glow
+  const ctx = p.drawingContext;
+  ctx.save();
+  ctx.shadowBlur = 18 * scaleFactor;
+  ctx.shadowColor = `rgba(255,255,255,${inRing ? 0.7 : 0.35})`;
+
+  p.noStroke();
+  p.fill(255, 255, 255, a);
+  p.circle(shark.x, shark.y, TARGET_R * 2);
+
+  // iç nokta
+  p.fill(255, 215, 0, a);
+  p.circle(shark.x, shark.y, TARGET_R * 0.9);
+
+  ctx.restore();
+  p.pop();
+}
+
 function renderHUD(p){
-  // Level arttıkça HUD rengi değişsin
   const hue = (game.level * 35) % 360;
   const col = hslToRgbCss(hue, 90, 60);
 
@@ -361,12 +394,11 @@ function renderHUD(p){
   p.pop();
 }
 
-/* ✅ Level up: ekran kadar görsel + altın yazı + glow (1.5 sn) */
 function renderLevelUpAnim(p){
   if (levelUpTimer <= 0) return;
 
-  const DURATION = 1500; // ✅ 1.5 saniye
-  const t = levelUpTimer / DURATION; // 1 -> 0
+  const DURATION = 1500;
+  const t = levelUpTimer / DURATION;
   const fade = 1 - Math.pow(1 - t, 2);
   const alpha = Math.floor(255 * fade);
 
@@ -395,7 +427,6 @@ function renderLevelUpAnim(p){
     ctx.restore();
   }
 
-  // altın yazı + glow
   const gold = p.color(255, 215, 0, alpha);
   ctx.save();
   ctx.shadowBlur = 28 * scaleFactor;
@@ -434,7 +465,6 @@ function renderOverlay(p, gameOver=false){
   p.pop();
 }
 
-// life logic
 function loseLife(){
   if (loseLife._lock) return;
   loseLife._lock = true;
@@ -443,7 +473,6 @@ function loseLife(){
   setTimeout(() => { loseLife._lock = false; }, 500);
 
   if (game.lives <= 0) {
-    // BEST TIME kaydet
     if (elapsedTime > bestTime) {
       bestTime = elapsedTime;
       localStorage.setItem(BEST_TIME_KEY, String(bestTime));
@@ -453,8 +482,29 @@ function loseLife(){
 }
 
 /* ==========================
-   COLLISION (ağız açıklığına göre)
+   RING + TARGET + COLLISION
    ========================== */
+function isInsideRing(px, py, pr){
+  const dx = px - shark.x;
+  const dy = py - shark.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+
+  const outerR = shark.w * 0.50;
+  const innerR = shark.w * 0.22;
+
+  return (dist + pr >= innerR) && (dist - pr <= outerR);
+}
+
+// ✅ Merkez noktaya dokunma (ring içindeyken çağrılıyor)
+function isTouchingTarget(px, py, pr){
+  const dx = px - shark.x;
+  const dy = py - shark.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+
+  // cat çarpışma yarıçapı + target yarıçapı
+  return dist <= (pr + TARGET_R);
+}
+
 function isCollidingWithSharkMouth(px, py, pr){
   const dx = px - shark.x;
   const dy = py - shark.y;
@@ -528,6 +578,7 @@ function lerp(a, b, t){ return a + (b - a) * t; }
 
 </body>
 </html>
+
 
 
 
