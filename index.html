@@ -9,100 +9,94 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background: #000;
+    html, body{
+      margin:0; padding:0;
+      width:100%; height:100%;
+      overflow:hidden;
+      background:#000;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     }
 
     /* INTRO */
-    #introWrap {
-      position: fixed;
-      inset: 0;
-      background: #000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
+    #introWrap{
+      position:fixed;
+      inset:0;
+      background:#000;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:9999;
+    }
+    #introVideo{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      background:#000;
     }
 
-    #introVideo {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
+    /* “İzlemek için dokunun ▶” */
+    #tapToStart{
+      position:absolute;
+      top:50%;
+      left:50%;
+      transform:translate(-50%,-50%);
+      padding:14px 22px;
+      border-radius:999px;
+      background:rgba(0,0,0,0.6);
+      color:#fff;
+      font-size:18px;
+      border:1px solid rgba(255,255,255,0.35);
+      display:none;
+      user-select:none;
+      animation:pulse 1.4s infinite;
+    }
+    @keyframes pulse{
+      0%{opacity:0.55;}
+      50%{opacity:1;}
+      100%{opacity:0.55;}
     }
 
-    /* TAP TO START */
-    #tapToStart {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      padding: 14px 22px;
-      border-radius: 999px;
-      background: rgba(0,0,0,0.6);
-      color: #fff;
-      font-size: 18px;
-      border: 1px solid rgba(255,255,255,0.35);
-      display: none;
-      user-select: none;
-      animation: pulse 1.4s infinite;
-    }
-
-    @keyframes pulse {
-      0%   { opacity: 0.55; }
-      50%  { opacity: 1; }
-      100% { opacity: 0.55; }
-    }
-
-    canvas {
-      display: block;
-      touch-action: none;
-    }
+    canvas{ display:block; touch-action:none; }
   </style>
 </head>
 
 <body>
 
-<!-- INTRO -->
-<div id="introWrap">
-  <video id="introVideo" playsinline preload="auto">
-    <source src="assets/intro.mp4" type="video/mp4">
-  </video>
-
-  <!-- İSTENEN YAZI -->
-  <div id="tapToStart">İzlemek için dokunun ▶</div>
-</div>
+  <!-- INTRO (sesli) -->
+  <div id="introWrap">
+    <video id="introVideo" playsinline preload="auto">
+      <source src="assets/intro.mp4?v=2" type="video/mp4" />
+    </video>
+    <div id="tapToStart">İzlemek için dokunun ▶</div>
+  </div>
 
 <script>
-/* ================= INTRO LOGIC ================= */
+/* ==========================
+   0) INTRO VIDEO
+   ========================== */
 const introWrap  = document.getElementById("introWrap");
 const introVideo = document.getElementById("introVideo");
 const tapToStart = document.getElementById("tapToStart");
 
-async function tryPlayIntro() {
-  try {
+async function tryPlayIntro(){
+  try{
     introVideo.muted = false;
     introVideo.volume = 1.0;
     const p = introVideo.play();
     if (p) await p;
-  } catch (e) {
+  }catch(e){
     tapToStart.style.display = "block";
   }
 }
 
 tapToStart.addEventListener("click", async () => {
   tapToStart.style.display = "none";
-  try {
+  try{
     introVideo.muted = false;
     introVideo.volume = 1.0;
     await introVideo.play();
-  } catch (e) {}
-});
+  }catch(e){}
+}, { passive:true });
 
 introVideo.addEventListener("ended", () => {
   introWrap.style.display = "none";
@@ -111,16 +105,36 @@ introVideo.addEventListener("ended", () => {
 
 tryPlayIntro();
 
-/* ================= GAME ================= */
-let bgImg, catImg, sharkImg;
-let state = "START";
+/* ==========================
+   1) GAME (p5.js)
+   ========================== */
+let bgImg, catImg, sharkImg, levelUpImg;
+
+let state = "START"; // START, PLAYING, GAMEOVER
 let scaleFactor = 1;
 
 const game = { score: 0, lives: 3, level: 1 };
+
+// TIME + BEST TIME
+let startTime = 0;
+let elapsedTime = 0;
+let bestTime = 0; // seconds
+const BEST_TIME_KEY = "behlul_best_time_v1";
+
 const TOUCH_X_OFFSET = -14;
 
+// LEVEL UP ANIM
+let levelUpText = "";
+let levelUpTimer = 0; // ms remaining
+
+// FLIP (ağız bazen ters tarafa açılsın)
+let flipTarget = 0;   // 0 veya PI
+let flipCurrent = 0;  // yumuşak geçiş
+
+// PLAYER
 const player = { x: 0, y: 0, r: 52 };
 
+// SHARK (DEV)
 const shark = {
   x: 0, y: 0,
   w: 520, h: 520,
@@ -128,13 +142,13 @@ const shark = {
   gapSize: 1.1
 };
 
-function startGame() {
+function startGame(){
   new p5(p => {
-
     p.preload = () => {
-      bgImg    = p.loadImage("assets/background.jpg");
-      catImg   = p.loadImage("assets/cat.png");
-      sharkImg = p.loadImage("assets/shark.png");
+      bgImg      = p.loadImage("assets/background.jpg?v=2");
+      catImg     = p.loadImage("assets/cat.png?v=2");
+      sharkImg   = p.loadImage("assets/shark.png?v=2");
+      levelUpImg = p.loadImage("assets/levelup.png?v=1"); // ✅ level-up görseli
     };
 
     p.setup = () => {
@@ -150,24 +164,48 @@ function startGame() {
     };
 
     p.draw = () => {
-      drawBackground(p);
+      renderBackground(p);
 
-      if (state === "START") return drawOverlay(p);
-      if (state === "GAMEOVER") return drawOverlay(p, true);
+      if (state === "START") {
+        renderOverlay(p, false);
+        return;
+      }
 
+      if (state === "GAMEOVER") {
+        renderOverlay(p, true);
+        return;
+      }
+
+      // PLAYING
       updateGame(p);
       renderGame(p);
+      renderHUD(p);
+      renderLevelUpAnim(p); // ✅ LEVEL anim
     };
 
-    p.touchStarted = p.mousePressed = () => {
-      if (state === "START") state = "PLAYING";
-      else if (state === "GAMEOVER") resetAll(p);
+    p.mousePressed = p.touchStarted = () => {
+      if (state === "START") {
+        startTime = p.millis();
+        elapsedTime = 0;
+
+        levelUpTimer = 0;
+        levelUpText = "";
+
+        state = "PLAYING";
+        return false;
+      }
+
+      if (state === "GAMEOVER") {
+        resetAll(p);
+        state = "START";
+        return false;
+      }
       return false;
     };
   });
 }
 
-function resetAll(p, keepState=false) {
+function resetAll(p, keepState=false){
   scaleFactor = Math.min(p.width, p.height) / 700;
 
   game.score = 0;
@@ -184,15 +222,30 @@ function resetAll(p, keepState=false) {
   shark.gapAngle = -0.3;
   shark.gapSize = 1.1;
 
-  state = keepState ? state : "START";
+  // best time yükle
+  bestTime = parseInt(localStorage.getItem(BEST_TIME_KEY) || "0", 10);
+
+  // süreyi sıfırla
+  startTime = p.millis();
+  elapsedTime = 0;
+
+  // level anim reset
+  levelUpTimer = 0;
+  levelUpText = "";
+
+  // flip reset
+  flipTarget = 0;
+  flipCurrent = 0;
+
+  if (!keepState) state = "START";
 }
 
-function drawBackground(p) {
-  if (!bgImg) return p.background(0);
+function renderBackground(p){
+  if (!bgImg) { p.background(0); return; }
 
   const cw = p.width, ch = p.height;
   const iw = bgImg.width, ih = bgImg.height;
-  const cr = cw / ch, ir = iw / ih;
+  const cr = cw/ch, ir = iw/ih;
 
   let dw, dh;
   if (ir > cr) { dh = ch; dw = dh * ir; }
@@ -201,72 +254,298 @@ function drawBackground(p) {
   p.image(bgImg, cw/2, ch/2, dw, dh);
 }
 
-function updateGame(p) {
-  const tx = (p.touches[0]?.x ?? p.mouseX) + TOUCH_X_OFFSET;
-  const ty = (p.touches[0]?.y ?? p.mouseY);
+function updateGame(p){
+  const tx = (p.touches && p.touches.length ? p.touches[0].x : p.mouseX) + TOUCH_X_OFFSET;
+  const ty = (p.touches && p.touches.length ? p.touches[0].y : p.mouseY);
 
-  player.x = lerp(player.x, clamp(tx, player.r, p.width-player.r), 0.25);
-  player.y = lerp(player.y, clamp(ty, player.r, p.height-player.r), 0.25);
+  player.x = lerp(player.x, clamp(tx, player.r, p.width - player.r), 0.25);
+  player.y = lerp(player.y, clamp(ty, player.r, p.height - player.r), 0.25);
 
-  shark.gapAngle += 0.02 + game.level * 0.002;
-  shark.gapSize = Math.max(0.7, 1.1 - game.level * 0.05);
+  // TIME
+  elapsedTime = Math.floor((p.millis() - startTime) / 1000);
 
-  if (collides()) loseLife();
+  // score/level
+  game.score += 1;
+
+  const prevLevel = game.level;
+  if (game.score % 900 === 0) game.level += 1;
+
+  // ✅ level-up anim başlat: LEVEL 2 / LEVEL 3 ...
+  if (game.level !== prevLevel) {
+    levelUpText = `LEVEL ${game.level}!`;
+    levelUpTimer = 1100;
+  }
+
+  // süreye göre zorluk
+  const timeDifficulty = Math.floor(elapsedTime / 20);
+
+  // --------------------
+  // 🦈 AĞIZ GENİŞLİĞİ (C gibi) + alt-üst oynama
+  // --------------------
+  const baseGap = 1.30;
+  const gapByLevel = (game.level - 1) * 0.045;
+  const gapByTime  = timeDifficulty * 0.025;
+
+  const waveSpeed = 0.015 + game.level * 0.002;
+  const waveAmp   = 0.10 + game.level * 0.015;
+  const wave      = Math.sin(p.millis() * waveSpeed) * waveAmp;
+
+  // --------------------
+  // 😈 HIGH LEVEL: aniden küçülüp büyüme (bite/pulse)
+  // --------------------
+  let biteFactor = 1.0;
+  if (game.level >= 4) {
+    const bitePeriod = 5500;
+    const biteWindow = 380;
+    const phase = p.millis() % bitePeriod;
+    if (phase < biteWindow) {
+      biteFactor = 0.65; // daha dar anlık
+    }
+  }
+
+  // --------------------
+  // 🦈 Bazen ters tarafa açılma (0 veya PI)
+  // --------------------
+  const flipBucket = Math.floor(p.millis() / 7000) % 3; // 2 normal + 1 ters
+  flipTarget = (flipBucket === 2) ? Math.PI : 0;
+  flipCurrent = lerp(flipCurrent, flipTarget, 0.06);
+
+  // --------------------
+  // 🌀 DÖNÜŞ + YÖN SALINIMI + TERS
+  // --------------------
+  const baseTurn = 0.02 + (game.level * 0.002) + (timeDifficulty * 0.0015);
+  shark.gapAngle += baseTurn;
+  shark.gapAngle += Math.sin(p.millis() * 0.002) * (0.015 + game.level * 0.002);
+  shark.gapAngle += flipCurrent;
+
+  // final gap
+  let gap = (baseGap - gapByLevel - gapByTime + wave) * biteFactor;
+  shark.gapSize = Math.max(0.70, gap);
+
+  // anim timer düşür (fps bağımsız küçük yaklaşım)
+  if (levelUpTimer > 0) levelUpTimer = Math.max(0, levelUpTimer - (1000/60));
+
+  if (isCollidingWithSharkMouth(player.x, player.y, player.r)) {
+    loseLife();
+  }
 }
 
-function renderGame(p) {
+function renderGame(p){
+  if (sharkImg) {
+    p.push();
+    p.translate(shark.x, shark.y);
+    p.rotate(shark.gapAngle);
+    p.image(sharkImg, 0, 0, shark.w, shark.h);
+    p.pop();
+  }
+
+  if (catImg) {
+    const catSize = 160 * scaleFactor;
+    p.image(catImg, player.x, player.y, catSize, catSize);
+  }
+}
+
+function renderHUD(p){
+  const hue = (game.level * 35) % 360;
+  const col = hslToRgbCss(hue, 90, 60);
+
+  const p5 = window; // (sadece isim çakışmasın diye)
+  // p5 değişkenini kullanmıyoruz, sadece not: p burada p5 instance
+
+  // p5 instance erişimi: renderHUD(p) parametresi zaten var
+  // (Bu satır sadece yanlışlık olmasın diye; istersen silebilirsin.)
+
+  // HUD
+  // (p burada p5 instance)
+  // Altın renk değil; level'e göre renk değişiyor (sen istemiştin)
+  // Level up yazısı altın & glow.
+  // HUD için de altın istersen söyle.
+}
+
+function renderHUD(p){
+  const hue = (game.level * 35) % 360;
+  const col = hslToRgbCss(hue, 90, 60);
+
   p.push();
-  p.translate(shark.x, shark.y);
-  p.rotate(shark.gapAngle);
-  p.image(sharkImg, 0, 0, shark.w, shark.h);
-  p.pop();
+  p.fill(col);
+  p.noStroke();
+  p.textAlign(p.LEFT, p.TOP);
+  p.textSize(18 * scaleFactor);
 
-  const catSize = 160 * scaleFactor;
-  p.image(catImg, player.x, player.y, catSize, catSize);
+  p.text(`Level: ${game.level}`, 16, 14);
+  p.text(`Score: ${game.score}`, 16, 38);
+  p.text(`Time: ${formatTime(elapsedTime)}`, 16, 62);
+  p.text(`Best: ${formatTime(bestTime)}`, 16, 86);
+
+  p.pop();
 }
 
-function drawOverlay(p, gameOver=false) {
+/* ✅ Level up: ekran kadar görsel + altın yazı + glow */
+function renderLevelUpAnim(p){
+  if (levelUpTimer <= 0) return;
+
+  const DURATION = 1100;
+  const t = levelUpTimer / DURATION; // 1 -> 0
+  const fade = 1 - Math.pow(1 - t, 2);
+  const alpha = Math.floor(255 * fade);
+
+  const bigSize = Math.max(p.width, p.height) * 1.15;
+
+  const ctx = p.drawingContext;
+  const glowStrength = 40 * scaleFactor;
+  const glowColor = `rgba(255, 255, 255, ${0.55 * fade})`;
+
+  p.push();
+  p.translate(p.width/2, p.height/2);
+
+  // glow'lu görsel
+  if (levelUpImg) {
+    ctx.save();
+    ctx.shadowBlur = glowStrength;
+    ctx.shadowColor = glowColor;
+
+    p.tint(255, Math.floor(90 * fade));
+    p.image(levelUpImg, 0, 0, bigSize * 1.06, bigSize * 1.06);
+    p.image(levelUpImg, 0, 0, bigSize * 1.03, bigSize * 1.03);
+
+    p.tint(255, alpha);
+    p.image(levelUpImg, 0, 0, bigSize, bigSize);
+    p.noTint();
+
+    ctx.restore();
+  }
+
+  // altın yazı + glow
+  const gold = p.color(255, 215, 0, alpha);
+  ctx.save();
+  ctx.shadowBlur = 28 * scaleFactor;
+  ctx.shadowColor = `rgba(255, 215, 0, ${0.85 * fade})`;
+
+  p.fill(gold);
+  p.noStroke();
+  p.textAlign(p.CENTER, p.CENTER);
+  p.textSize(64 * scaleFactor);
+  p.text(levelUpText, 0, 0);
+
+  ctx.restore();
+  p.pop();
+}
+
+function renderOverlay(p, gameOver=false){
+  p.push();
   p.fill(0,0,0,160);
   p.rect(0,0,p.width,p.height);
 
   p.fill(255);
-  p.textAlign(p.CENTER,p.CENTER);
-  p.textSize(48*scaleFactor);
-  p.text("Behlul & Inci", p.width/2, p.height/2-20);
+  p.textAlign(p.CENTER, p.CENTER);
 
-  p.textSize(22*scaleFactor);
-  p.text("Tekrar denemek için dokun", p.width/2, p.height/2+40);
+  p.textSize(48 * scaleFactor);
+  p.text("Behlul & Inci", p.width/2, p.height/2 - 50);
+
+  if (gameOver) {
+    p.textSize(22 * scaleFactor);
+    p.text(`Best: ${formatTime(bestTime)}`, p.width/2, p.height/2 - 5);
+    p.text("Tekrar denemek için dokun", p.width/2, p.height/2 + 35);
+  } else {
+    p.textSize(22 * scaleFactor);
+    p.text("Başlamak için dokun", p.width/2, p.height/2 + 20);
+  }
+
+  p.pop();
 }
 
-function loseLife() {
-  if (loseLife.lock) return;
-  loseLife.lock = true;
-  game.lives--;
-  setTimeout(()=>loseLife.lock=false, 500);
-  if (game.lives <= 0) state = "GAMEOVER";
+// life logic
+function loseLife(){
+  if (loseLife._lock) return;
+  loseLife._lock = true;
+
+  game.lives -= 1;
+  setTimeout(() => { loseLife._lock = false; }, 500);
+
+  if (game.lives <= 0) {
+    // BEST TIME kaydet
+    if (elapsedTime > bestTime) {
+      bestTime = elapsedTime;
+      localStorage.setItem(BEST_TIME_KEY, String(bestTime));
+    }
+    state = "GAMEOVER";
+  }
 }
 
-function collides() {
-  const dx = player.x - shark.x;
-  const dy = player.y - shark.y;
-  const d  = Math.sqrt(dx*dx + dy*dy);
+/* ==========================
+   COLLISION
+   ========================== */
+function isCollidingWithSharkMouth(px, py, pr){
+  const dx = px - shark.x;
+  const dy = py - shark.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
 
-  const outer = shark.w * 0.5;
-  const inner = shark.w * 0.22;
-  if (d + player.r < inner || d - player.r > outer) return false;
+  const outerR = shark.w * 0.50;
+  const innerR = shark.w * 0.22;
 
-  const a  = Math.atan2(dy, dx);
-  const a0 = norm(shark.gapAngle - shark.gapSize/2);
-  const a1 = norm(shark.gapAngle + shark.gapSize/2);
+  const withinRing = (dist + pr >= innerR) && (dist - pr <= outerR);
+  if (!withinRing) return false;
 
-  return !(between(a,a0,a1));
+  const ang = Math.atan2(dy, dx);
+
+  const a0 = normalizeAngle(shark.gapAngle - shark.gapSize/2);
+  const a1 = normalizeAngle(shark.gapAngle + shark.gapSize/2);
+
+  const inGap = isAngleBetween(ang, a0, a1);
+  return !inGap;
 }
 
-function norm(a){ while(a<-Math.PI)a+=Math.PI*2; while(a>Math.PI)a-=Math.PI*2; return a; }
-function between(a,s,e){ return s<=e ? (a>=s&&a<=e) : (a>=s||a<=e); }
-function clamp(v,mn,mx){ return Math.max(mn,Math.min(mx,v)); }
-function lerp(a,b,t){ return a+(b-a)*t; }
+function normalizeAngle(a){
+  while (a < -Math.PI) a += Math.PI*2;
+  while (a >  Math.PI) a -= Math.PI*2;
+  return a;
+}
+
+function isAngleBetween(a, start, end){
+  a = normalizeAngle(a);
+  start = normalizeAngle(start);
+  end = normalizeAngle(end);
+
+  if (start <= end) return (a >= start && a <= end);
+  return (a >= start || a <= end);
+}
+
+/* ==========================
+   TIME FORMAT + HUD COLOR
+   ========================== */
+function formatTime(seconds){
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m.toString().padStart(2,"0")}:${s.toString().padStart(2,"0")}`;
+}
+
+function hslToRgbCss(h, s, l){
+  s /= 100; l /= 100;
+  const c = (1 - Math.abs(2*l - 1)) * s;
+  const x = c * (1 - Math.abs(((h/60) % 2) - 1));
+  const m = l - c/2;
+
+  let r=0,g=0,b=0;
+  if (0 <= h && h < 60) { r=c; g=x; b=0; }
+  else if (60 <= h && h < 120) { r=x; g=c; b=0; }
+  else if (120 <= h && h < 180) { r=0; g=c; b=x; }
+  else if (180 <= h && h < 240) { r=0; g=x; b=c; }
+  else if (240 <= h && h < 300) { r=x; g=0; b=c; }
+  else { r=c; g=0; b=x; }
+
+  r = Math.round((r+m)*255);
+  g = Math.round((g+m)*255);
+  b = Math.round((b+m)*255);
+  return `rgb(${r},${g},${b})`;
+}
+
+/* ==========================
+   UTILS
+   ========================== */
+function clamp(v, mn, mx){ return Math.max(mn, Math.min(mx, v)); }
+function lerp(a, b, t){ return a + (b - a) * t; }
 </script>
 
 </body>
 </html>
+
