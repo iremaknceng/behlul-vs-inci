@@ -3,21 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Behlul vs İnci</title>
+  <title>Behlul & Inci</title>
 
   <!-- p5.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 
   <style>
     html, body {
-      margin: 0; padding: 0;
-      width: 100%; height: 100%;
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
       overflow: hidden;
       background: #000;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     }
 
-    /* Intro katmanı (video) */
+    /* INTRO */
     #introWrap {
       position: fixed;
       inset: 0;
@@ -32,56 +34,63 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
-      background: #000;
     }
 
-    /* “Sesi açmak için dokun” overlay */
+    /* TAP TO START */
     #tapToStart {
       position: absolute;
-      bottom: 10%;
+      top: 50%;
       left: 50%;
-      transform: translateX(-50%);
-      padding: 12px 16px;
+      transform: translate(-50%, -50%);
+      padding: 14px 22px;
       border-radius: 999px;
-      background: rgba(0,0,0,0.55);
-      color: white;
-      font-size: 16px;
-      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      font-size: 18px;
+      border: 1px solid rgba(255,255,255,0.35);
       display: none;
       user-select: none;
+      animation: pulse 1.4s infinite;
     }
 
-    canvas { display: block; touch-action: none; }
+    @keyframes pulse {
+      0%   { opacity: 0.55; }
+      50%  { opacity: 1; }
+      100% { opacity: 0.55; }
+    }
+
+    canvas {
+      display: block;
+      touch-action: none;
+    }
   </style>
 </head>
+
 <body>
 
-  <!-- INTRO (sesli) -->
-  <div id="introWrap">
-    <video id="introVideo" playsinline preload="auto">
-      <source src="assets/intro.mp4" type="video/mp4" />
-    </video>
-    <div id="tapToStart">Sesi açmak ve başlatmak için dokun</div>
-  </div>
+<!-- INTRO -->
+<div id="introWrap">
+  <video id="introVideo" playsinline preload="auto">
+    <source src="assets/intro.mp4" type="video/mp4">
+  </video>
+
+  <!-- İSTENEN YAZI -->
+  <div id="tapToStart">İzlemek için dokunun ▶</div>
+</div>
 
 <script>
-/* ==========================
-   0) INTRO VIDEO (sesli)
-   ========================== */
-const introWrap = document.getElementById("introWrap");
+/* ================= INTRO LOGIC ================= */
+const introWrap  = document.getElementById("introWrap");
 const introVideo = document.getElementById("introVideo");
 const tapToStart = document.getElementById("tapToStart");
 
-// Mobil tarayıcılarda sesli video için genelde “kullanıcı etkileşimi” gerekir.
-// Bu yüzden önce otomatik deniyoruz; olmazsa “dokun” overlay'i gösteriyoruz.
 async function tryPlayIntro() {
   try {
-    introVideo.muted = false;       // intro sesli olsun
+    introVideo.muted = false;
     introVideo.volume = 1.0;
     const p = introVideo.play();
     if (p) await p;
   } catch (e) {
-    // autoplay engellendi -> kullanıcı dokunmalı
     tapToStart.style.display = "block";
   }
 }
@@ -92,65 +101,39 @@ tapToStart.addEventListener("click", async () => {
     introVideo.muted = false;
     introVideo.volume = 1.0;
     await introVideo.play();
-  } catch (e) {
-    // Bazı cihazlarda hala engel olabilir; yine de devam edeceğiz.
-  }
-}, { passive: true });
+  } catch (e) {}
+});
 
 introVideo.addEventListener("ended", () => {
   introWrap.style.display = "none";
-  startGame(); // oyun başlat
+  startGame();
 });
 
-// İlk deneme
 tryPlayIntro();
 
-/* ==========================
-   1) GAME (p5.js)
-   ========================== */
+/* ================= GAME ================= */
 let bgImg, catImg, sharkImg;
-
-let state = "START"; // START, PLAYING, GAMEOVER
-
-const game = {
-  score: 0,
-  lives: 3,
-  level: 1
-};
-
-// Ekrana göre ölçek
+let state = "START";
 let scaleFactor = 1;
 
-// Oyuncu (kedi kafası) — parmak görmesin diye hafif sola offset
-const player = {
-  x: 0,
-  y: 0,
-  r: 22,          // çarpışma yarıçapı (oyun hissi)
-  speed: 0
-};
+const game = { score: 0, lives: 3, level: 1 };
+const TOUCH_X_OFFSET = -14;
 
-// Parmağın kapatmasını azaltmak için küçük bir "sola kaydırma"
-const TOUCH_X_OFFSET = -14; // px (yaklaşık 2mm değil ama pratikte daha işe yarar)
+const player = { x: 0, y: 0, r: 52 };
 
-let rings = [];
-let ringTimer = 0;
-
-// Shark mouth (engel) özellikleri
 const shark = {
-  x: 0,
-  y: 0,
-  w: 220,
-  h: 220,
+  x: 0, y: 0,
+  w: 520, h: 520,
   gapAngle: 0,
-  gapSize: 0.9 // rad cinsinden açıklık (kolaylık)
+  gapSize: 1.1
 };
 
-function startGame(){
-  // p5 sketch başlat
+function startGame() {
   new p5(p => {
+
     p.preload = () => {
-      bgImg = p.loadImage("assets/background.jpg");
-      catImg = p.loadImage("assets/cat.png");
+      bgImg    = p.loadImage("assets/background.jpg");
+      catImg   = p.loadImage("assets/cat.png");
       sharkImg = p.loadImage("assets/shark.png");
     };
 
@@ -167,295 +150,122 @@ function startGame(){
     };
 
     p.draw = () => {
-      renderBackground(p);
+      drawBackground(p);
 
-      if (state === "START") {
-        renderHUD(p);
-        renderStartScreen(p);
-        return;
-      }
+      if (state === "START") return drawOverlay(p);
+      if (state === "GAMEOVER") return drawOverlay(p, true);
 
-      if (state === "GAMEOVER") {
-        renderHUD(p);
-        renderGameOver(p);
-        return;
-      }
-
-      // PLAYING
       updateGame(p);
       renderGame(p);
-      renderHUD(p);
     };
 
-    // Tap/Click
-    p.mousePressed = () => {
-      if (state === "START") {
-        state = "PLAYING";
-        return false;
-      }
-      if (state === "GAMEOVER") {
-        resetAll(p);
-        state = "START";
-        return false;
-      }
-      return false;
-    };
-
-    // Touch
-    p.touchStarted = () => {
-      if (state === "START") {
-        state = "PLAYING";
-        return false;
-      }
-      if (state === "GAMEOVER") {
-        resetAll(p);
-        state = "START";
-        return false;
-      }
+    p.touchStarted = p.mousePressed = () => {
+      if (state === "START") state = "PLAYING";
+      else if (state === "GAMEOVER") resetAll(p);
       return false;
     };
   });
 }
 
-function resetAll(p, keepState=false){
-  // ölçek (mobil/desktop)
+function resetAll(p, keepState=false) {
   scaleFactor = Math.min(p.width, p.height) / 700;
 
   game.score = 0;
   game.lives = 3;
   game.level = 1;
 
-  player.r = 22 * scaleFactor;
-
+  player.r = 52 * scaleFactor;
   player.x = p.width * 0.25;
   player.y = p.height * 0.5;
-  player.speed = 0;
 
-  shark.w = 240 * scaleFactor;
-  shark.h = 240 * scaleFactor;
-  shark.x = p.width * 0.72;
-  shark.y = p.height * 0.5;
-  shark.gapAngle = -0.2;
-  shark.gapSize = 1.0; // daha rahat açıklık
+  shark.w = shark.h = 520 * scaleFactor;
+  shark.x = p.width / 2;
+  shark.y = p.height / 2;
+  shark.gapAngle = -0.3;
+  shark.gapSize = 1.1;
 
-  rings = [];
-  ringTimer = 0;
-
-  if (!keepState) state = "START";
+  state = keepState ? state : "START";
 }
 
-function renderBackground(p){
-  // arka plan fotoğrafı full cover
-  if (bgImg) {
-    // cover hesapla
-    const cw = p.width, ch = p.height;
-    const iw = bgImg.width, ih = bgImg.height;
-    const cr = cw/ch, ir = iw/ih;
+function drawBackground(p) {
+  if (!bgImg) return p.background(0);
 
-    let dw, dh;
-    if (ir > cr) {
-      dh = ch;
-      dw = dh * ir;
-    } else {
-      dw = cw;
-      dh = dw / ir;
-    }
-    p.push();
-    p.image(bgImg, cw/2, ch/2, dw, dh);
-    p.pop();
-  } else {
-    p.background(0);
-  }
+  const cw = p.width, ch = p.height;
+  const iw = bgImg.width, ih = bgImg.height;
+  const cr = cw / ch, ir = iw / ih;
+
+  let dw, dh;
+  if (ir > cr) { dh = ch; dw = dh * ir; }
+  else { dw = cw; dh = dw / ir; }
+
+  p.image(bgImg, cw/2, ch/2, dw, dh);
 }
 
-function updateGame(p){
-  // oyuncu takibi: mouse/touch
-  const targetX = (p.touches && p.touches.length)
-    ? p.touches[0].x + TOUCH_X_OFFSET
-    : p.mouseX + TOUCH_X_OFFSET;
+function updateGame(p) {
+  const tx = (p.touches[0]?.x ?? p.mouseX) + TOUCH_X_OFFSET;
+  const ty = (p.touches[0]?.y ?? p.mouseY);
 
-  const targetY = (p.touches && p.touches.length)
-    ? p.touches[0].y
-    : p.mouseY;
+  player.x = lerp(player.x, clamp(tx, player.r, p.width-player.r), 0.25);
+  player.y = lerp(player.y, clamp(ty, player.r, p.height-player.r), 0.25);
 
-  // yumuşak takip
-  player.x = lerp(player.x, clamp(targetX, player.r, p.width - player.r), 0.22);
-  player.y = lerp(player.y, clamp(targetY, player.r, p.height - player.r), 0.22);
+  shark.gapAngle += 0.02 + game.level * 0.002;
+  shark.gapSize = Math.max(0.7, 1.1 - game.level * 0.05);
 
-  // “shark mouth” açıklığı yavaşça hareket etsin (level ile biraz hızlansın)
-  shark.gapAngle += 0.012 + game.level * 0.0015;
-
-  // Zorluk: level arttıkça açıklık biraz daralır (çok değil)
-  shark.gapSize = Math.max(0.65, 1.0 - (game.level - 1) * 0.06);
-
-  // Skor/level
-  game.score += 1;
-  if (game.score % 900 === 0) game.level += 1;
-
-  // Çarpışma: kedi köpekbalığı ağzının “kapalı” kısmına değerse can gider,
-  // “açıklık” içinden geçerse sorun yok.
-  if (isCollidingWithSharkMouth(p, player.x, player.y, player.r)) {
-    loseLife(p);
-  }
+  if (collides()) loseLife();
 }
 
-function renderGame(p){
-  // Köpekbalığı ağzı (engel)
-  if (sharkImg) {
-    p.push();
-    p.translate(shark.x, shark.y);
-    p.image(sharkImg, 0, 0, shark.w, shark.h);
-
-    // açıklık gösterimi (debug değil, çok hafif yarı saydam)
-    // İstersen kapatabiliriz.
-    p.noStroke();
-    p.fill(0, 0, 0, 40);
-    // (isteğe bağlı)
-    p.pop();
-  } else {
-    // fallback çizim
-    p.push();
-    p.noFill();
-    p.stroke(255);
-    p.strokeWeight(6 * scaleFactor);
-    p.circle(shark.x, shark.y, shark.w);
-    p.pop();
-  }
-
-  // Kedi kafası (top yerine)
-  if (catImg) {
-    const size = 64 * scaleFactor;
-    p.image(catImg, player.x, player.y, size, size);
-  } else {
-    p.push();
-    p.fill(255);
-    p.noStroke();
-    p.circle(player.x, player.y, player.r * 2);
-    p.pop();
-  }
-}
-
-function renderHUD(p){
+function renderGame(p) {
   p.push();
-  p.fill(255);
-  p.noStroke();
-  p.textSize(18 * scaleFactor);
-  p.textAlign(p.LEFT, p.TOP);
-  p.text(`Score: ${game.score}`, 16, 16);
-  p.text(`Lives: ${game.lives}`, 16, 16 + 26 * scaleFactor);
-  p.text(`Level: ${game.level}`, 16, 16 + 52 * scaleFactor);
+  p.translate(shark.x, shark.y);
+  p.rotate(shark.gapAngle);
+  p.image(sharkImg, 0, 0, shark.w, shark.h);
   p.pop();
+
+  const catSize = 160 * scaleFactor;
+  p.image(catImg, player.x, player.y, catSize, catSize);
 }
 
-function renderStartScreen(p){
-  p.push();
-  p.fill(0, 0, 0, 140);
-  p.rect(0, 0, p.width, p.height);
+function drawOverlay(p, gameOver=false) {
+  p.fill(0,0,0,160);
+  p.rect(0,0,p.width,p.height);
 
   p.fill(255);
-  p.textAlign(p.CENTER, p.CENTER);
-  p.textSize(34 * scaleFactor);
-  p.text("Behlul vs İnci", p.width/2, p.height/2 - 60*scaleFactor);
+  p.textAlign(p.CENTER,p.CENTER);
+  p.textSize(48*scaleFactor);
+  p.text("Behlul & Inci", p.width/2, p.height/2-20);
 
-  p.textSize(18 * scaleFactor);
-  p.text("Amaç: Kedinin kafası köpekbalığının ağzının AÇIK kısmından geçsin.", p.width/2, p.height/2 - 10*scaleFactor);
-  p.text("Dokun/Tıkla: Başla", p.width/2, p.height/2 + 30*scaleFactor);
-  p.pop();
+  p.textSize(22*scaleFactor);
+  p.text("Tekrar denemek için dokun", p.width/2, p.height/2+40);
 }
 
-function renderGameOver(p){
-  p.push();
-  p.fill(0, 0, 0, 160);
-  p.rect(0, 0, p.width, p.height);
-
-  p.fill(255);
-  p.textAlign(p.CENTER, p.CENTER);
-  p.textSize(42 * scaleFactor);
-  p.text("GAME OVER", p.width/2, p.height/2 - 30*scaleFactor);
-
-  p.textSize(20 * scaleFactor);
-  p.text(`Skor: ${game.score}`, p.width/2, p.height/2 + 18*scaleFactor);
-  p.text("Dokun/Tıkla: Yeniden Başlat", p.width/2, p.height/2 + 55*scaleFactor);
-  p.pop();
+function loseLife() {
+  if (loseLife.lock) return;
+  loseLife.lock = true;
+  game.lives--;
+  setTimeout(()=>loseLife.lock=false, 500);
+  if (game.lives <= 0) state = "GAMEOVER";
 }
 
-function loseLife(p){
-  // basit “cooldown” (art arda can düşmesin)
-  if (loseLife._cooldown) return;
-  loseLife._cooldown = true;
+function collides() {
+  const dx = player.x - shark.x;
+  const dy = player.y - shark.y;
+  const d  = Math.sqrt(dx*dx + dy*dy);
 
-  game.lives -= 1;
+  const outer = shark.w * 0.5;
+  const inner = shark.w * 0.22;
+  if (d + player.r < inner || d - player.r > outer) return false;
 
-  // küçük ekran titreme efekti (çok hafif)
-  // (İstersen kaldırırız)
-  const oldX = player.x;
-  player.x = player.x - 10 * scaleFactor;
+  const a  = Math.atan2(dy, dx);
+  const a0 = norm(shark.gapAngle - shark.gapSize/2);
+  const a1 = norm(shark.gapAngle + shark.gapSize/2);
 
-  setTimeout(() => {
-    player.x = oldX;
-    loseLife._cooldown = false;
-  }, 450);
-
-  if (game.lives <= 0) {
-    state = "GAMEOVER";
-  }
+  return !(between(a,a0,a1));
 }
 
-function isCollidingWithSharkMouth(p, px, py, pr){
-  // Köpekbalığı ağız görselini “halka gibi” kabul edip,
-  // merkez etrafında açı hesaplayacağız.
-  // Açıklık (gap) içindeyse güvenli; dışında ve yarıçap aralığında ise çarpışma.
-
-  // Kedi - shark merkez vektörü
-  const dx = px - shark.x;
-  const dy = py - shark.y;
-
-  const dist = Math.sqrt(dx*dx + dy*dy);
-
-  // “ağız halkası” yarıçap aralığı (görseline göre ayarlı)
-  const outerR = (shark.w * 0.48);       // dış yarıçap
-  const innerR = (shark.w * 0.28);       // iç yarıçap
-  const withinRing = (dist + pr >= innerR) && (dist - pr <= outerR);
-
-  if (!withinRing) return false;
-
-  // açı
-  let ang = Math.atan2(dy, dx); // -PI..PI
-
-  // gap açı aralığı
-  // gapAngle merkez, gapSize genişlik
-  const a0 = normalizeAngle(shark.gapAngle - shark.gapSize/2);
-  const a1 = normalizeAngle(shark.gapAngle + shark.gapSize/2);
-
-  const inGap = isAngleBetween(ang, a0, a1);
-
-  // Eğer gap içinde ise "geçiş açık" -> çarpışma yok
-  // Gap dışında halka bölgesindeyse -> çarpışma var
-  return !inGap;
-}
-
-function normalizeAngle(a){
-  while (a < -Math.PI) a += Math.PI*2;
-  while (a >  Math.PI) a -= Math.PI*2;
-  return a;
-}
-
-function isAngleBetween(a, start, end){
-  // start->end aralığı wrap olabilir
-  a = normalizeAngle(a);
-  start = normalizeAngle(start);
-  end = normalizeAngle(end);
-
-  if (start <= end) {
-    return (a >= start && a <= end);
-  } else {
-    // wrap: örn start=2.8, end=-2.8
-    return (a >= start || a <= end);
-  }
-}
-
-function clamp(v, mn, mx){ return Math.max(mn, Math.min(mx, v)); }
-function lerp(a, b, t){ return a + (b - a) * t; }
+function norm(a){ while(a<-Math.PI)a+=Math.PI*2; while(a>Math.PI)a-=Math.PI*2; return a; }
+function between(a,s,e){ return s<=e ? (a>=s&&a<=e) : (a>=s||a<=e); }
+function clamp(v,mn,mx){ return Math.max(mn,Math.min(mx,v)); }
+function lerp(a,b,t){ return a+(b-a)*t; }
 </script>
 
 </body>
