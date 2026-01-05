@@ -15,19 +15,27 @@
       background:#000;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     }
+
     #introWrap{
-      position:fixed; inset:0;
+      position:fixed;
+      inset:0;
       background:#000;
-      display:flex; align-items:center; justify-content:center;
+      display:flex;
+      align-items:center;
+      justify-content:center;
       z-index:9999;
     }
     #introVideo{
-      width:100%; height:100%;
-      object-fit:cover; background:#000;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      background:#000;
     }
+
     #tapToStart{
       position:absolute;
-      top:50%; left:50%;
+      top:50%;
+      left:50%;
       transform:translate(-50%,-50%);
       padding:14px 22px;
       border-radius:999px;
@@ -44,11 +52,13 @@
       50%{opacity:1;}
       100%{opacity:0.55;}
     }
+
     canvas{ display:block; touch-action:none; }
   </style>
 </head>
 
 <body>
+
   <div id="introWrap">
     <video id="introVideo" playsinline preload="auto">
       <source src="assets/intro.mp4?v=2" type="video/mp4" />
@@ -94,15 +104,18 @@ tryPlayIntro();
    ========================== */
 let bgImg, catImg, sharkImg, levelUpImg;
 
-let levelUpSound;
-let pingSound;
-let hitSound;
+// Sounds
+let levelUpSound; // assets/levelup.mp3
+let pingSound;    // assets/ping.mp3
+let hitSound;     // assets/hit.mp3
 
 let state = "START"; // START, PLAYING, LEVELPAUSE, GAMEOVER
 let scaleFactor = 1;
 
+// Game stats
 const game = { score: 0, lives: 3, level: 1 };
 
+// Time + Best Time
 let startTime = 0;
 let elapsedTime = 0;
 let bestTime = 0;
@@ -110,55 +123,76 @@ const BEST_TIME_KEY = "behlul_best_time_v1";
 
 const TOUCH_X_OFFSET = -14;
 
+// Level up anim
 let levelUpText = "";
-let levelUpTimer = 0;
+let levelUpTimer = 0; // ms
 
+// ✅ Input lock (Start’a basınca ilk dokunuş kediyi parmağa çekmesin)
 let inputLockUntilMs = 0;
+
+// ✅ Level pause bookkeeping
 let pauseStartMs = 0;
 
+// Player
 const player = { x: 0, y: 0, r: 0 };
 let CAT_SIZE = 160;
 
+// Shark
 const shark = {
   x: 0, y: 0,
   w: 0, h: 0,
-  angle: 0,
-  gapAngle: 0,
-  gapSize: 1.25
+  angle: 0,      // visual rotation
+  gapAngle: 0,   // collision reference
+  gapSize: 1.25  // not used directly now, but kept
 };
 
-// ✅ Mouth geometry
-const MOUTH_OUTER_RATIO = 0.50;
-const MOUTH_INNER_RATIO = 0.38; // istediğin
-const MOUTH_ENTER_MARGIN = 6;    // px (scale ile çarpılacak)
-const MOUTH_EXIT_MARGIN  = 10;   // px (scale ile çarpılacak)
-
-// ✅ Target
+// Target scoring
 let TARGET_R = 18;
 
-// ✅ “Ağız içindeyim”
-let inMouth = false;
+// ✅ mouth state for “1 entry 1 score”
+let inMouthRing = false;
 let scoredThisEntry = false;
 
-// Smooth snap
+// Smooth snap (level up spawn)
 let snapActive = false;
 let snapStartMs = 0;
 let snapDurMs = 220;
 let snapFromX = 0, snapFromY = 0;
 let snapToX = 0, snapToY = 0;
 
+/* ==========================
+   ✅ Mouth Zones (your picture)
+   - RED: safe
+   - BLUE: deadly
+   - Outside mouth ring: nothing happens
+   ========================== */
+
+// Mouth ring radii
+const MOUTH_OUTER_RATIO = 0.50;
+const MOUTH_INNER_RATIO = 0.38; // you chose 0.38
+
+// RED safe “C” opening size (bigger = more red safe area)
+const SAFE_GAP_SIZE = 1.35;
+
+// BLUE deadly margins near the two ends of the red area
+const DEAD_MARGIN = 0.25;
+
 function startGame(){
   new p5(p => {
-
     p.preload = () => {
       bgImg      = p.loadImage("assets/background.jpg?v=2");
       catImg     = p.loadImage("assets/cat.png?v=2");
       sharkImg   = p.loadImage("assets/shark.png?v=2");
       levelUpImg = p.loadImage("assets/levelup.png?v=1");
 
-      levelUpSound = new Audio("assets/levelup.mp3"); levelUpSound.volume = 0.8;
-      pingSound    = new Audio("assets/ping.mp3");    pingSound.volume = 0.9;
-      hitSound     = new Audio("assets/hit.mp3");     hitSound.volume = 0.9;
+      levelUpSound = new Audio("assets/levelup.mp3");
+      levelUpSound.volume = 0.8;
+
+      pingSound = new Audio("assets/ping.mp3");
+      pingSound.volume = 0.9;
+
+      hitSound = new Audio("assets/hit.mp3");
+      hitSound.volume = 0.9;
     };
 
     p.setup = () => {
@@ -176,9 +210,16 @@ function startGame(){
     p.draw = () => {
       renderBackground(p);
 
-      if (state === "START") { renderStartScreen(p); return; }
-      if (state === "GAMEOVER") { renderGameOver(p); return; }
+      if (state === "START") {
+        renderStartScreen(p);
+        return;
+      }
+      if (state === "GAMEOVER") {
+        renderGameOver(p);
+        return;
+      }
 
+      // ✅ Level geçişinde oyun durur, dokunmadan başlamaz
       if (state === "LEVELPAUSE") {
         renderGame(p);
         renderCenterTarget(p);
@@ -197,13 +238,16 @@ function startGame(){
 
     p.mousePressed = p.touchStarted = () => {
       if (state === "START") {
-        // ✅ Audio unlock (mobil için)
-        if (pingSound) { pingSound.play().then(()=>{ pingSound.pause(); pingSound.currentTime=0; }).catch(()=>{}); }
-        if (hitSound)  { hitSound.play().then(()=>{ hitSound.pause(); hitSound.currentTime=0; }).catch(()=>{}); }
+        // Audio unlock for mobile
+        if (pingSound) pingSound.play().then(()=>{ pingSound.pause(); pingSound.currentTime=0; }).catch(()=>{});
+        if (hitSound)  hitSound.play().then(()=>{ hitSound.pause(); hitSound.currentTime=0; }).catch(()=>{});
 
+        // ✅ Start’a basınca kesin sağ alttan başlasın
         const spawn = getBottomRightSpawn(p);
-        player.x = spawn.x; player.y = spawn.y;
+        player.x = spawn.x;
+        player.y = spawn.y;
 
+        // ✅ ilk dokunuş/klik kediyi parmağa çekmesin
         inputLockUntilMs = p.millis() + 250;
 
         startTime = p.millis();
@@ -213,6 +257,7 @@ function startGame(){
       }
 
       if (state === "LEVELPAUSE") {
+        // ✅ Pause süresini zamandan düş (timer duruyormuş gibi)
         const paused = p.millis() - pauseStartMs;
         startTime += paused;
 
@@ -232,16 +277,13 @@ function startGame(){
   });
 }
 
-/* ✅ Spawn */
+/* ✅ Cat her zaman sağ alt köşeden spawn */
 function getBottomRightSpawn(p){
   return {
     x: p.width  - player.r - 24 * scaleFactor,
     y: p.height - player.r - 24 * scaleFactor
   };
 }
-
-function mouthInnerR(){ return shark.w * MOUTH_INNER_RATIO; }
-function mouthOuterR(){ return shark.w * MOUTH_OUTER_RATIO; }
 
 function resetAll(p, keepState=false){
   scaleFactor = Math.min(p.width, p.height) / 700;
@@ -263,7 +305,6 @@ function resetAll(p, keepState=false){
 
   shark.angle = -0.3;
   shark.gapAngle = shark.angle;
-  shark.gapSize = 1.25;
 
   TARGET_R = 18 * scaleFactor;
 
@@ -275,13 +316,10 @@ function resetAll(p, keepState=false){
   levelUpTimer = 0;
   levelUpText = "";
 
-  inMouth = false;
+  inMouthRing = false;
   scoredThisEntry = false;
 
   snapActive = false;
-  inputLockUntilMs = p.millis() + 120;
-
-  pauseStartMs = 0;
 
   if (!keepState) state = "START";
 }
@@ -300,31 +338,8 @@ function renderBackground(p){
   p.image(bgImg, cw/2, ch/2, dw, dh);
 }
 
-/* ✅ sağlam inMouth (histerezis) */
-function updateInMouth(px, py, pr){
-  const dx = px - shark.x;
-  const dy = py - shark.y;
-  const dist = Math.sqrt(dx*dx + dy*dy);
-
-  const r = mouthInnerR();
-  const enter = MOUTH_ENTER_MARGIN * scaleFactor;
-  const exit  = MOUTH_EXIT_MARGIN  * scaleFactor;
-
-  if (!inMouth) {
-    if (dist <= (r + pr - enter)) {
-      inMouth = true;
-      scoredThisEntry = false;
-    }
-  } else {
-    if (dist >= (r + pr + exit)) {
-      inMouth = false;
-      scoredThisEntry = false;
-    }
-  }
-}
-
 function updateGame(p){
-  // follow / snap
+  // Player follow OR smooth snap
   if (!snapActive) {
     if (p.millis() >= inputLockUntilMs) {
       const tx = (p.touches && p.touches.length ? p.touches[0].x : p.mouseX) + TOUCH_X_OFFSET;
@@ -341,14 +356,17 @@ function updateGame(p){
     if (t >= 1) snapActive = false;
   }
 
-  // time
+  // Time
   elapsedTime = Math.floor((p.millis() - startTime) / 1000);
 
-  // ✅ ağız içi algılama
-  updateInMouth(player.x, player.y, player.r);
+  // Mouth ring entry/exit (for "1 entry 1 score")
+  const ringNow = isInsideMouthRing(player.x, player.y, player.r);
 
-  // ✅ Score: ağız içindeyken target'a 1 kere dokun (+margin ile "zerre" garanti)
-  if (inMouth && !scoredThisEntry) {
+  if (!inMouthRing && ringNow) { inMouthRing = true; scoredThisEntry = false; }
+  if ( inMouthRing && !ringNow) { inMouthRing = false; scoredThisEntry = false; }
+
+  // ✅ Score only: mouth ring içindeyken target'a 1 kere dokununca +10
+  if (inMouthRing && !scoredThisEntry) {
     if (isTouchingTarget(player.x, player.y, player.r)) {
       game.score += 10;
       scoredThisEntry = true;
@@ -360,7 +378,7 @@ function updateGame(p){
     }
   }
 
-  // level up
+  // Level: every 100 score
   const newLevel = Math.floor(game.score / 100) + 1;
   if (newLevel !== game.level) {
     game.level = newLevel;
@@ -373,25 +391,27 @@ function updateGame(p){
       levelUpSound.play().catch(()=>{});
     }
 
+    // ✅ Yeni level'a sağ alt köşeye kayarak başla
     startSmoothSnapToBottomRight(p);
 
+    // ✅ Level pause: dokunmadan başlamasın
     pauseStartMs = p.millis();
     state = "LEVELPAUSE";
     return;
   }
 
-  // rotate
+  // Shark rotation: odd cw, even ccw + speed up
   const dir = (game.level % 2 === 1) ? 1 : -1;
   const baseSpeed = 0.008;
   const speedPerLevel = 0.0035;
   shark.angle += (baseSpeed + (game.level - 1) * speedPerLevel) * dir;
   shark.gapAngle = shark.angle;
 
-  // anim timer
+  // Level up timer
   if (levelUpTimer > 0) levelUpTimer = Math.max(0, levelUpTimer - (1000/60));
 
-  // collision
-  if (isCollidingWithSharkMouth(player.x, player.y, player.r)) {
+  // ✅ Collision ONLY in BLUE ZONES (outside mouth ring = NOTHING)
+  if (isCollidingInBlueZone(player.x, player.y, player.r)) {
     loseLife();
   }
 }
@@ -404,24 +424,28 @@ function renderGame(p){
     p.image(sharkImg, 0, 0, shark.w, shark.h);
     p.pop();
   }
-  if (catImg) p.image(catImg, player.x, player.y, CAT_SIZE, CAT_SIZE);
+
+  if (catImg) {
+    p.image(catImg, player.x, player.y, CAT_SIZE, CAT_SIZE);
+  }
 }
 
 function renderCenterTarget(p){
   p.push();
+
   const ctx = p.drawingContext;
   ctx.save();
   ctx.shadowBlur = 18 * scaleFactor;
-  ctx.shadowColor = `rgba(255,255,255,${inMouth ? 0.7 : 0.35})`;
+  ctx.shadowColor = `rgba(255,255,255,${inMouthRing ? 0.7 : 0.35})`;
 
-  const touching = (inMouth && !scoredThisEntry && isTouchingTarget(player.x, player.y, player.r));
+  const touching = (inMouthRing && !scoredThisEntry && isTouchingTarget(player.x, player.y, player.r));
 
   p.noStroke();
   if (touching) p.fill(0, 255, 120, 230);
-  else p.fill(255, 255, 255, inMouth ? 200 : 120);
+  else p.fill(255, 255, 255, inMouthRing ? 200 : 120);
   p.circle(shark.x, shark.y, TARGET_R * 2);
 
-  p.fill(255, 215, 0, inMouth ? 200 : 120);
+  p.fill(255, 215, 0, inMouthRing ? 200 : 120);
   p.circle(shark.x, shark.y, TARGET_R * 0.9);
 
   ctx.restore();
@@ -563,39 +587,69 @@ function loseLife(){
   }
 }
 
-/* ✅ Target touch: "zerresi bile değse" için margin ekledik */
+/* ==========================
+   ✅ Geometry helpers
+   ========================== */
+
+function isInsideMouthRing(px, py, pr){
+  const dx = px - shark.x;
+  const dy = py - shark.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+
+  const outerR = shark.w * MOUTH_OUTER_RATIO;
+  const innerR = shark.w * MOUTH_INNER_RATIO;
+
+  // ring/annulus intersection with player's circle
+  return (dist + pr >= innerR) && (dist - pr <= outerR);
+}
+
+/* ✅ “cat'in zerresi target'a değse bile” => margin */
 function isTouchingTarget(px, py, pr){
   const dx = px - shark.x;
   const dy = py - shark.y;
   const dist = Math.sqrt(dx*dx + dy*dy);
 
-  const TOUCH_MARGIN = 6 * scaleFactor; // ✅ zerre garanti
+  const TOUCH_MARGIN = 6 * scaleFactor; // increase to 10 if you want even easier
   return dist <= (pr + TARGET_R + TOUCH_MARGIN);
 }
 
-// ✅ collision: ring bölgesinde gap dışında kalırsan çarp
-function isCollidingWithSharkMouth(px, py, pr){
-  // ağız boşluğu içindeysen çarpışma yok
-  if (inMouth) return false;
-
+/* ✅ Only BLUE kills. Red safe. Outside ring: NOTHING. */
+function isCollidingInBlueZone(px, py, pr){
   const dx = px - shark.x;
   const dy = py - shark.y;
   const dist = Math.sqrt(dx*dx + dy*dy);
 
-  const outerR = mouthOuterR();
-  const innerR = mouthInnerR();
+  // ⬛ Outside mouth ring => NOTHING
+  const outerR = shark.w * MOUTH_OUTER_RATIO;
+  const innerR = shark.w * MOUTH_INNER_RATIO;
+  const inRing = (dist + pr >= innerR) && (dist - pr <= outerR);
+  if (!inRing) return false;
 
-  const withinRing = (dist + pr >= innerR) && (dist - pr <= outerR);
-  if (!withinRing) return false;
+  // Angle of cat center
+  const ang = normalizeAngle(Math.atan2(dy, dx));
 
-  const ang = Math.atan2(dy, dx);
-  const a0 = normalizeAngle(shark.gapAngle - shark.gapSize/2);
-  const a1 = normalizeAngle(shark.gapAngle + shark.gapSize/2);
+  // 🔴 Red safe zone (centered on shark.angle)
+  const safeStart = normalizeAngle(shark.angle - SAFE_GAP_SIZE/2);
+  const safeEnd   = normalizeAngle(shark.angle + SAFE_GAP_SIZE/2);
 
-  const inGap = isAngleBetween(ang, a0, a1);
-  return !inGap;
+  const inRedSafe = isAngleBetween(ang, safeStart, safeEnd);
+  if (inRedSafe) return false; // 🟥 safe
+
+  // 🔵 Blue deadly zones = two margins near the ends of red zone
+  const leftDeadStart  = normalizeAngle(safeStart - DEAD_MARGIN);
+  const rightDeadEnd   = normalizeAngle(safeEnd + DEAD_MARGIN);
+
+  const inBlue =
+    isAngleBetween(ang, leftDeadStart, safeStart) ||
+    isAngleBetween(ang, safeEnd, rightDeadEnd);
+
+  if (inBlue) return true; // 🟦 kill
+
+  // Everything else inside ring => NOTHING (you asked)
+  return false;
 }
 
+/* ✅ Level up olduğunda sağ alt köşeye smooth kay */
 function startSmoothSnapToBottomRight(p){
   const spawn = getBottomRightSpawn(p);
 
@@ -608,7 +662,7 @@ function startSmoothSnapToBottomRight(p){
   snapActive = true;
   snapStartMs = p.millis();
 
-  inMouth = false;
+  inMouthRing = false;
   scoredThisEntry = false;
 
   inputLockUntilMs = p.millis() + 220;
