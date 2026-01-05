@@ -207,7 +207,7 @@ function startGame(){
         renderCenterTarget(p);
         renderHUD(p);
         renderLevelPauseOverlay(p);
-        renderLevelUpAnim(p); // animasyon isterse görünsün
+        renderLevelUpAnim(p);
         return;
       }
 
@@ -239,8 +239,7 @@ function startGame(){
         const paused = p.millis() - pauseStartMs;
         startTime += paused;
 
-        // ✅ Devam et
-        inputLockUntilMs = p.millis() + 250; // devam ederken de çekmesin
+        inputLockUntilMs = p.millis() + 250;
         state = "PLAYING";
         return false;
       }
@@ -304,7 +303,6 @@ function resetAll(p, keepState=false){
 
   snapActive = false;
 
-  // ✅ Reset sonrası da kısa lock: ilk frame input çekmesin
   inputLockUntilMs = p.millis() + 120;
 
   if (!keepState) state = "START";
@@ -327,8 +325,6 @@ function renderBackground(p){
 function updateGame(p){
   // Player follow OR smooth snap
   if (!snapActive) {
-
-    // ✅ input lock bitene kadar takip etme (spawn net görünsün)
     if (p.millis() >= inputLockUntilMs) {
       const tx = (p.touches && p.touches.length ? p.touches[0].x : p.mouseX) + TOUCH_X_OFFSET;
       const ty = (p.touches && p.touches.length ? p.touches[0].y : p.mouseY);
@@ -336,7 +332,6 @@ function updateGame(p){
       player.x = lerp(player.x, clamp(tx, player.r, p.width - player.r), 0.25);
       player.y = lerp(player.y, clamp(ty, player.r, p.height - player.r), 0.25);
     }
-
   } else {
     const t = (p.millis() - snapStartMs) / snapDurMs;
     const e = easeOutCubic(t);
@@ -371,9 +366,6 @@ function updateGame(p){
   const newLevel = Math.floor(game.score / 100) + 1;
   if (newLevel !== game.level) {
     pendingLevel = newLevel;
-
-    // HUD/renk vb. yeni level gözüksün diye şimdi set ediyoruz,
-    // ama oyun LEVELPAUSE ile duracak.
     game.level = pendingLevel;
 
     levelUpText = `LEVEL ${game.level}!`;
@@ -384,14 +376,11 @@ function updateGame(p){
       levelUpSound.play().catch(()=>{});
     }
 
-    // ✅ Yeni level'a sağ alt köşeye kayarak hazırlan
     startSmoothSnapToBottomRight(p);
 
-    // ✅ OYUNU DURDUR
     pauseStartMs = p.millis();
     state = "LEVELPAUSE";
-
-    return; // çarpışma vs. çalışmasın
+    return;
   }
 
   // Shark rotation: odd cw, even ccw + speed up
@@ -587,7 +576,7 @@ function isInsideRing(px, py, pr){
   const dist = Math.sqrt(dx*dx + dy*dy);
 
   const outerR = shark.w * 0.50;
-  const innerR = shark.w * 0.22;
+  const innerR = shark.w * 0.38; // ✅ ağız içi büyütüldü
 
   return (dist + pr >= innerR) && (dist - pr <= outerR);
 }
@@ -605,7 +594,7 @@ function isCollidingWithSharkMouth(px, py, pr){
   const dist = Math.sqrt(dx*dx + dy*dy);
 
   const outerR = shark.w * 0.50;
-  const innerR = shark.w * 0.22;
+  const innerR = shark.w * 0.38; // ✅ ağız içi büyütüldü
 
   const withinRing = (dist + pr >= innerR) && (dist - pr <= outerR);
   if (!withinRing) return false;
@@ -635,7 +624,6 @@ function startSmoothSnapToBottomRight(p){
   inRing = false;
   scoredThisEntry = false;
 
-  // ✅ snap bitene kadar input'u biraz kilitle
   inputLockUntilMs = p.millis() + 220;
 }
 
@@ -691,5 +679,4 @@ function lerp(a, b, t){ return a + (b - a) * t; }
 
 </body>
 </html>
-
 
