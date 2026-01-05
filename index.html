@@ -84,7 +84,6 @@ async function tryPlayIntro(){
     tapToStart.style.display = "block";
   }
 }
-
 tapToStart.addEventListener("click", async () => {
   tapToStart.style.display = "none";
   try{
@@ -98,7 +97,6 @@ introVideo.addEventListener("ended", () => {
   introWrap.style.display = "none";
   startGame();
 });
-
 tryPlayIntro();
 
 /* ==========================
@@ -147,7 +145,7 @@ let TARGET_R = 18;
 let inRing = false;
 let scoredThisEntry = false;
 
-// Smooth snap on level up
+// Smooth snap (level up spawn)
 let snapActive = false;
 let snapStartMs = 0;
 let snapDurMs = 220;
@@ -191,7 +189,6 @@ function startGame(){
         renderStartScreen(p);
         return;
       }
-
       if (state === "GAMEOVER") {
         renderGameOver(p);
         return;
@@ -221,6 +218,14 @@ function startGame(){
   });
 }
 
+/* ✅ Cat her zaman sağ alt köşeden spawn */
+function getBottomRightSpawn(p){
+  return {
+    x: p.width  - player.r - 24 * scaleFactor,
+    y: p.height - player.r - 24 * scaleFactor
+  };
+}
+
 function resetAll(p, keepState=false){
   scaleFactor = Math.min(p.width, p.height) / 700;
 
@@ -231,8 +236,9 @@ function resetAll(p, keepState=false){
   CAT_SIZE = 160 * scaleFactor;
   player.r = CAT_SIZE * 0.55;
 
-  player.x = p.width * 0.25;
-  player.y = p.height * 0.5;
+  const spawn = getBottomRightSpawn(p);
+  player.x = spawn.x;
+  player.y = spawn.y;
 
   shark.w = shark.h = 520 * scaleFactor;
   shark.x = p.width * 0.5;
@@ -325,7 +331,8 @@ function updateGame(p){
       levelUpSound.play().catch(()=>{});
     }
 
-    startSmoothSnapOutsideRing(p);
+    // ✅ Yeni level'a sağ alt köşeye kayarak başla
+    startSmoothSnapToBottomRight(p);
   }
 
   // Shark rotation: odd cw, even ccw + speed up
@@ -537,16 +544,15 @@ function isCollidingWithSharkMouth(px, py, pr){
   return !inGap;
 }
 
-function startSmoothSnapOutsideRing(p){
-  const outerR = shark.w * 0.50;
-  const safeX = shark.x - outerR - player.r - 40 * scaleFactor;
-  const safeY = p.height * 0.5;
+/* ✅ Level up olduğunda sağ alt köşeye smooth kay */
+function startSmoothSnapToBottomRight(p){
+  const spawn = getBottomRightSpawn(p);
 
   snapFromX = player.x;
   snapFromY = player.y;
 
-  snapToX = clamp(safeX, player.r, p.width - player.r);
-  snapToY = clamp(safeY, player.r, p.height - player.r);
+  snapToX = spawn.x;
+  snapToY = spawn.y;
 
   snapActive = true;
   snapStartMs = p.millis();
@@ -607,5 +613,6 @@ function lerp(a, b, t){ return a + (b - a) * t; }
 
 </body>
 </html>
+
 
 
