@@ -78,8 +78,8 @@ async function tryPlayIntro(){
   try{
     introVideo.muted = false;
     introVideo.volume = 1.0;
-    const p = introVideo.play();
-    if (p) await p;
+    const pr = introVideo.play();
+    if (pr) await pr;
   }catch(e){
     tapToStart.style.display = "block";
   }
@@ -106,7 +106,7 @@ tryPlayIntro();
    ========================== */
 let bgImg, catImg, sharkImg, levelUpImg;
 
-// 🔊 Sounds
+// Sounds
 let levelUpSound; // assets/levelup.mp3
 let pingSound;    // assets/ping.mp3
 let hitSound;     // assets/hit.mp3
@@ -114,39 +114,45 @@ let hitSound;     // assets/hit.mp3
 let state = "START"; // START, PLAYING, GAMEOVER
 let scaleFactor = 1;
 
+// Game stats
 const game = { score: 0, lives: 3, level: 1 };
 
-// TIME + BEST TIME
-let startTime = 0;     // ms
-let elapsedTime = 0;   // seconds (this run)
-let bestTime = 0;      // seconds (saved)
+// Time + Best Time
+let startTime = 0;
+let elapsedTime = 0;
+let bestTime = 0;
 const BEST_TIME_KEY = "behlul_best_time_v1";
 
 const TOUCH_X_OFFSET = -14;
 
-// LEVEL UP ANIM
+// Level up anim
 let levelUpText = "";
-let levelUpTimer = 0; // ms remaining
+let levelUpTimer = 0; // ms
 
-// PLAYER
-const player = { x: 0, y: 0, r: 52 };
-let CAT_SIZE = 160; // resetAll'da scale ile ayarlanacak
+// Player
+const player = { x: 0, y: 0, r: 0 };
+let CAT_SIZE = 160;
 
-// SHARK
+// Shark
 const shark = {
   x: 0, y: 0,
-  w: 520, h: 520,
-  angle: 0,
-  gapAngle: 0,
-  gapSize: 1.25
+  w: 0, h: 0,
+  angle: 0,      // visual rotation
+  gapAngle: 0,   // collision gap direction (same as angle)
+  gapSize: 1.25  // "C" mouth
 };
 
-/* ==========================
-   SCORE RULES (TARGET)
-   ========================== */
-let TARGET_R = 10; // resetAll'da scale ile ayarlanacak
+// Target scoring
+let TARGET_R = 18;
 let inRing = false;
 let scoredThisEntry = false;
+
+// Smooth snap on level up
+let snapActive = false;
+let snapStartMs = 0;
+let snapDurMs = 220;
+let snapFromX = 0, snapFromY = 0;
+let snapToX = 0, snapToY = 0;
 
 function startGame(){
   new p5(p => {
@@ -156,7 +162,6 @@ function startGame(){
       sharkImg   = p.loadImage("assets/shark.png?v=2");
       levelUpImg = p.loadImage("assets/levelup.png?v=1");
 
-      // 🔊 Sounds (dosya adları birebir böyle olmalı)
       levelUpSound = new Audio("assets/levelup.mp3");
       levelUpSound.volume = 0.8;
 
@@ -183,11 +188,12 @@ function startGame(){
       renderBackground(p);
 
       if (state === "START") {
-        renderOverlay(p, false);
+        renderStartScreen(p);
         return;
       }
+
       if (state === "GAMEOVER") {
-        renderOverlay(p, true);
+        renderGameOver(p);
         return;
       }
 
@@ -202,10 +208,6 @@ function startGame(){
       if (state === "START") {
         startTime = p.millis();
         elapsedTime = 0;
-
-        levelUpTimer = 0;
-        levelUpText = "";
-
         state = "PLAYING";
         return false;
       }
@@ -226,22 +228,20 @@ function resetAll(p, keepState=false){
   game.lives = 3;
   game.level = 1;
 
-  // Cat boyutu + radius (✅ “cat’in herhangi bir zerresi” için)
   CAT_SIZE = 160 * scaleFactor;
-  player.r = CAT_SIZE * 0.55; // biraz affetmeli (0.5 da olur)
+  player.r = CAT_SIZE * 0.55;
 
   player.x = p.width * 0.25;
   player.y = p.height * 0.5;
 
   shark.w = shark.h = 520 * scaleFactor;
-  shark.x = p.width / 2;
-  shark.y = p.height / 2;
+  shark.x = p.width * 0.5;
+  shark.y = p.height * 0.5;
 
   shark.angle = -0.3;
   shark.gapAngle = shark.angle;
   shark.gapSize = 1.25;
 
-  // Target boyutu (biraz büyük -> daha iyi his)
   TARGET_R = 18 * scaleFactor;
 
   bestTime = parseInt(localStorage.getItem(BEST_TIME_KEY) || "0", 10);
@@ -252,9 +252,10 @@ function resetAll(p, keepState=false){
   levelUpTimer = 0;
   levelUpText = "";
 
-  // Score state reset
   inRing = false;
   scoredThisEntry = false;
+
+  snapActive = false;
 
   if (!keepState) state = "START";
 }
@@ -274,12 +275,20 @@ function renderBackground(p){
 }
 
 function updateGame(p){
-  // Player follow
-  const tx = (p.touches && p.touches.length ? p.touches[0].x : p.mouseX) + TOUCH_X_OFFSET;
-  const ty = (p.touches && p.touches.length ? p.touches[0].y : p.mouseY);
+  // Player follow OR smooth snap
+  if (!snapActive) {
+    const tx = (p.touches && p.touches.length ? p.touches[0].x : p.mouseX) + TOUCH_X_OFFSET;
+    const ty = (p.touches && p.touches.length ? p.touches[0].y : p.mouseY);
 
-  player.x = lerp(player.x, clamp(tx, player.r, p.width - player.r), 0.25);
-  player.y = lerp(player.y, clamp(ty, player.r, p.height - player.r), 0.25);
+    player.x = lerp(player.x, clamp(tx, player.r, p.width - player.r), 0.25);
+    player.y = lerp(player.y, clamp(ty, player.r, p.height - player.r), 0.25);
+  } else {
+    const t = (p.millis() - snapStartMs) / snapDurMs;
+    const e = easeOutCubic(t);
+    player.x = lerp(snapFromX, snapToX, e);
+    player.y = lerp(snapFromY, snapToY, e);
+    if (t >= 1) snapActive = false;
+  }
 
   // Time
   elapsedTime = Math.floor((p.millis() - startTime) / 1000);
@@ -287,30 +296,23 @@ function updateGame(p){
   // Ring entry/exit
   const insideRingNow = isInsideRing(player.x, player.y, player.r);
 
-  if (!inRing && insideRingNow) {
-    inRing = true;
-    scoredThisEntry = false;
-  }
-  if (inRing && !insideRingNow) {
-    inRing = false;
-    scoredThisEntry = false;
-  }
+  if (!inRing && insideRingNow) { inRing = true; scoredThisEntry = false; }
+  if ( inRing && !insideRingNow) { inRing = false; scoredThisEntry = false; }
 
-  // ✅ Score only: Ring içindeyken target'a 1 kere dokununca +10
+  // Score only: ring içindeyken target'a 1 kere dokununca +10
   if (inRing && !scoredThisEntry) {
     if (isTouchingTarget(player.x, player.y, player.r)) {
-      addScore(10);
+      game.score += 10;
       scoredThisEntry = true;
 
-      // 🔔 PING sesi
       if (pingSound) {
         pingSound.currentTime = 0;
-        pingSound.play().catch(() => {});
+        pingSound.play().catch(()=>{});
       }
     }
   }
 
-  // Level: her 100 score'da artar
+  // Level: every 100 score
   const newLevel = Math.floor(game.score / 100) + 1;
   if (newLevel !== game.level) {
     game.level = newLevel;
@@ -318,41 +320,31 @@ function updateGame(p){
     levelUpText = `LEVEL ${game.level}!`;
     levelUpTimer = 1500;
 
-    // 🆙 Level up sesi
     if (levelUpSound) {
       levelUpSound.currentTime = 0;
-      levelUpSound.play().catch(() => {});
+      levelUpSound.play().catch(()=>{});
     }
+
+    startSmoothSnapOutsideRing(p);
   }
 
-  // Shark rotation: tek level saat yönü, çift level ters
+  // Shark rotation: odd cw, even ccw + speed up
   const dir = (game.level % 2 === 1) ? 1 : -1;
-
-  // Level arttıkça hız artsın (başta yavaş)
   const baseSpeed = 0.008;
   const speedPerLevel = 0.0035;
-  const rotSpeed = (baseSpeed + (game.level - 1) * speedPerLevel) * dir;
-
-  shark.angle += rotSpeed;
+  shark.angle += (baseSpeed + (game.level - 1) * speedPerLevel) * dir;
   shark.gapAngle = shark.angle;
 
-  // Level anim timer azalt
-  if (levelUpTimer > 0) {
-    levelUpTimer = Math.max(0, levelUpTimer - (1000/60));
-  }
+  // Level up timer
+  if (levelUpTimer > 0) levelUpTimer = Math.max(0, levelUpTimer - (1000/60));
 
-  // Collision (yanma)
+  // Collision
   if (isCollidingWithSharkMouth(player.x, player.y, player.r)) {
     loseLife();
   }
 }
 
-function addScore(n){
-  game.score += n;
-}
-
 function renderGame(p){
-  // shark
   if (sharkImg) {
     p.push();
     p.translate(shark.x, shark.y);
@@ -361,7 +353,6 @@ function renderGame(p){
     p.pop();
   }
 
-  // cat
   if (catImg) {
     p.image(catImg, player.x, player.y, CAT_SIZE, CAT_SIZE);
   }
@@ -375,16 +366,13 @@ function renderCenterTarget(p){
   ctx.shadowBlur = 18 * scaleFactor;
   ctx.shadowColor = `rgba(255,255,255,${inRing ? 0.7 : 0.35})`;
 
-  // hedefe dokunuyorsa yeşil göster (debug değil, feedback)
   const touching = (inRing && !scoredThisEntry && isTouchingTarget(player.x, player.y, player.r));
 
   p.noStroke();
   if (touching) p.fill(0, 255, 120, 230);
   else p.fill(255, 255, 255, inRing ? 200 : 120);
-
   p.circle(shark.x, shark.y, TARGET_R * 2);
 
-  // iç nokta (altın)
   p.fill(255, 215, 0, inRing ? 200 : 120);
   p.circle(shark.x, shark.y, TARGET_R * 0.9);
 
@@ -404,9 +392,41 @@ function renderHUD(p){
 
   p.text(`Level: ${game.level}`, 16, 14);
   p.text(`Score: ${game.score}`, 16, 38);
-  p.text(`Time: ${formatTime(elapsedTime)}`, 16, 62);
-  p.text(`Best: ${formatTime(bestTime)}`, 16, 86);
+  p.text(`Lives: ${game.lives}`, 16, 62);
+  p.text(`Time: ${formatTime(elapsedTime)}`, 16, 86);
+  p.text(`Best: ${formatTime(bestTime)}`, 16, 110);
 
+  p.pop();
+}
+
+function renderStartScreen(p){
+  p.push();
+  p.fill(0,0,0,160);
+  p.rect(0,0,p.width,p.height);
+
+  p.fill(255);
+  p.textAlign(p.CENTER,p.CENTER);
+  p.textSize(46*scaleFactor);
+  p.text("Behlul & Inci", p.width/2, p.height/2 - 40*scaleFactor);
+
+  p.textSize(22*scaleFactor);
+  p.text("Başlamak için dokun", p.width/2, p.height/2 + 25*scaleFactor);
+  p.pop();
+}
+
+function renderGameOver(p){
+  p.push();
+  p.fill(0,0,0,170);
+  p.rect(0,0,p.width,p.height);
+
+  p.fill(255);
+  p.textAlign(p.CENTER,p.CENTER);
+  p.textSize(42*scaleFactor);
+  p.text("GAME OVER", p.width/2, p.height/2 - 35*scaleFactor);
+
+  p.textSize(22*scaleFactor);
+  p.text(`Best: ${formatTime(bestTime)}`, p.width/2, p.height/2 + 5*scaleFactor);
+  p.text("Tekrar denemek için dokun", p.width/2, p.height/2 + 45*scaleFactor);
   p.pop();
 }
 
@@ -458,37 +478,13 @@ function renderLevelUpAnim(p){
   p.pop();
 }
 
-function renderOverlay(p, gameOver=false){
-  p.push();
-  p.fill(0,0,0,160);
-  p.rect(0,0,p.width,p.height);
-
-  p.fill(255);
-  p.textAlign(p.CENTER, p.CENTER);
-
-  p.textSize(48 * scaleFactor);
-  p.text("Behlul & Inci", p.width/2, p.height/2 - 50);
-
-  if (gameOver) {
-    p.textSize(22 * scaleFactor);
-    p.text(`Best: ${formatTime(bestTime)}`, p.width/2, p.height/2 - 5);
-    p.text("Tekrar denemek için dokun", p.width/2, p.height/2 + 35);
-  } else {
-    p.textSize(22 * scaleFactor);
-    p.text("Başlamak için dokun", p.width/2, p.height/2 + 20);
-  }
-
-  p.pop();
-}
-
 function loseLife(){
   if (loseLife._lock) return;
   loseLife._lock = true;
 
-  // 🔥 yanma sesi
   if (hitSound) {
     hitSound.currentTime = 0;
-    hitSound.play().catch(() => {});
+    hitSound.play().catch(()=>{});
   }
 
   game.lives -= 1;
@@ -503,9 +499,6 @@ function loseLife(){
   }
 }
 
-/* ==========================
-   RING + TARGET + COLLISION
-   ========================== */
 function isInsideRing(px, py, pr){
   const dx = px - shark.x;
   const dy = py - shark.y;
@@ -521,8 +514,6 @@ function isTouchingTarget(px, py, pr){
   const dx = px - shark.x;
   const dy = py - shark.y;
   const dist = Math.sqrt(dx*dx + dy*dy);
-
-  // ✅ cat’in herhangi bir zerresi target’a değerse
   return dist <= (pr + TARGET_R);
 }
 
@@ -543,9 +534,30 @@ function isCollidingWithSharkMouth(px, py, pr){
   const a1 = normalizeAngle(shark.gapAngle + shark.gapSize/2);
 
   const inGap = isAngleBetween(ang, a0, a1);
-
-  // Gap dışındaysa çarpışma
   return !inGap;
+}
+
+function startSmoothSnapOutsideRing(p){
+  const outerR = shark.w * 0.50;
+  const safeX = shark.x - outerR - player.r - 40 * scaleFactor;
+  const safeY = p.height * 0.5;
+
+  snapFromX = player.x;
+  snapFromY = player.y;
+
+  snapToX = clamp(safeX, player.r, p.width - player.r);
+  snapToY = clamp(safeY, player.r, p.height - player.r);
+
+  snapActive = true;
+  snapStartMs = p.millis();
+
+  inRing = false;
+  scoredThisEntry = false;
+}
+
+function easeOutCubic(t){
+  t = clamp(t, 0, 1);
+  return 1 - Math.pow(1 - t, 3);
 }
 
 function normalizeAngle(a){
@@ -563,9 +575,6 @@ function isAngleBetween(a, start, end){
   return (a >= start || a <= end);
 }
 
-/* ==========================
-   TIME FORMAT + HUD COLOR
-   ========================== */
 function formatTime(seconds){
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
@@ -592,17 +601,11 @@ function hslToRgbCss(h, s, l){
   return `rgb(${r},${g},${b})`;
 }
 
-/* ==========================
-   UTILS
-   ========================== */
 function clamp(v, mn, mx){ return Math.max(mn, Math.min(mx, v)); }
 function lerp(a, b, t){ return a + (b - a) * t; }
 </script>
 
 </body>
 </html>
-
-
-
 
 
