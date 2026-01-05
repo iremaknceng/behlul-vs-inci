@@ -127,6 +127,9 @@ const TOUCH_X_OFFSET = -14;
 let levelUpText = "";
 let levelUpTimer = 0; // ms
 
+// ✅ Input lock (Start’a basınca ilk dokunuş kediyi parmağa çekmesin)
+let inputLockUntilMs = 0;
+
 // Player
 const player = { x: 0, y: 0, r: 0 };
 let CAT_SIZE = 160;
@@ -203,6 +206,14 @@ function startGame(){
 
     p.mousePressed = p.touchStarted = () => {
       if (state === "START") {
+        // ✅ Start’a basınca kesin sağ alttan başlasın
+        const spawn = getBottomRightSpawn(p);
+        player.x = spawn.x;
+        player.y = spawn.y;
+
+        // ✅ ilk dokunuş/klik kediyi parmağa çekmesin
+        inputLockUntilMs = p.millis() + 250;
+
         startTime = p.millis();
         elapsedTime = 0;
         state = "PLAYING";
@@ -263,6 +274,9 @@ function resetAll(p, keepState=false){
 
   snapActive = false;
 
+  // ✅ Reset sonrası da kısa lock: ilk frame input çekmesin
+  inputLockUntilMs = p.millis() + 120;
+
   if (!keepState) state = "START";
 }
 
@@ -283,11 +297,16 @@ function renderBackground(p){
 function updateGame(p){
   // Player follow OR smooth snap
   if (!snapActive) {
-    const tx = (p.touches && p.touches.length ? p.touches[0].x : p.mouseX) + TOUCH_X_OFFSET;
-    const ty = (p.touches && p.touches.length ? p.touches[0].y : p.mouseY);
 
-    player.x = lerp(player.x, clamp(tx, player.r, p.width - player.r), 0.25);
-    player.y = lerp(player.y, clamp(ty, player.r, p.height - player.r), 0.25);
+    // ✅ Start’a basınca ilk 250ms input’u yok say (spawn net görünsün)
+    if (p.millis() >= inputLockUntilMs) {
+      const tx = (p.touches && p.touches.length ? p.touches[0].x : p.mouseX) + TOUCH_X_OFFSET;
+      const ty = (p.touches && p.touches.length ? p.touches[0].y : p.mouseY);
+
+      player.x = lerp(player.x, clamp(tx, player.r, p.width - player.r), 0.25);
+      player.y = lerp(player.y, clamp(ty, player.r, p.height - player.r), 0.25);
+    }
+
   } else {
     const t = (p.millis() - snapStartMs) / snapDurMs;
     const e = easeOutCubic(t);
@@ -559,6 +578,9 @@ function startSmoothSnapToBottomRight(p){
 
   inRing = false;
   scoredThisEntry = false;
+
+  // ✅ snap bitene kadar input'u biraz kilitle
+  inputLockUntilMs = p.millis() + 220;
 }
 
 function easeOutCubic(t){
@@ -613,6 +635,7 @@ function lerp(a, b, t){ return a + (b - a) * t; }
 
 </body>
 </html>
+
 
 
 
