@@ -109,7 +109,7 @@ let levelUpSound; // assets/levelup.mp3
 let pingSound;    // assets/ping.mp3
 let hitSound;     // assets/hit.mp3
 
-let state = "START"; // START, PLAYING, GAMEOVER
+let state = "START"; // START, PLAYING, LEVELPAUSE, GAMEOVER
 let scaleFactor = 1;
 
 // Game stats
@@ -129,6 +129,10 @@ let levelUpTimer = 0; // ms
 
 // ✅ Input lock (Start’a basınca ilk dokunuş kediyi parmağa çekmesin)
 let inputLockUntilMs = 0;
+
+// ✅ Level pause bookkeeping
+let pendingLevel = 1;
+let pauseStartMs = 0;
 
 // Player
 const player = { x: 0, y: 0, r: 0 };
@@ -197,6 +201,16 @@ function startGame(){
         return;
       }
 
+      // ✅ Level geçişinde oyun durur, dokunmadan başlamaz
+      if (state === "LEVELPAUSE") {
+        renderGame(p);
+        renderCenterTarget(p);
+        renderHUD(p);
+        renderLevelPauseOverlay(p);
+        renderLevelUpAnim(p); // animasyon isterse görünsün
+        return;
+      }
+
       updateGame(p);
       renderGame(p);
       renderCenterTarget(p);
@@ -219,11 +233,24 @@ function startGame(){
         state = "PLAYING";
         return false;
       }
+
+      if (state === "LEVELPAUSE") {
+        // ✅ Pause süresini zamandan düş (timer duruyormuş gibi)
+        const paused = p.millis() - pauseStartMs;
+        startTime += paused;
+
+        // ✅ Devam et
+        inputLockUntilMs = p.millis() + 250; // devam ederken de çekmesin
+        state = "PLAYING";
+        return false;
+      }
+
       if (state === "GAMEOVER") {
         resetAll(p);
         state = "START";
         return false;
       }
+
       return false;
     };
   });
@@ -243,6 +270,9 @@ function resetAll(p, keepState=false){
   game.score = 0;
   game.lives = 3;
   game.level = 1;
+
+  pendingLevel = 1;
+  pauseStartMs = 0;
 
   CAT_SIZE = 160 * scaleFactor;
   player.r = CAT_SIZE * 0.55;
@@ -298,7 +328,7 @@ function updateGame(p){
   // Player follow OR smooth snap
   if (!snapActive) {
 
-    // ✅ Start’a basınca ilk 250ms input’u yok say (spawn net görünsün)
+    // ✅ input lock bitene kadar takip etme (spawn net görünsün)
     if (p.millis() >= inputLockUntilMs) {
       const tx = (p.touches && p.touches.length ? p.touches[0].x : p.mouseX) + TOUCH_X_OFFSET;
       const ty = (p.touches && p.touches.length ? p.touches[0].y : p.mouseY);
@@ -337,10 +367,14 @@ function updateGame(p){
     }
   }
 
-  // Level: every 100 score
+  // ✅ LEVEL UP: yeni level'a geçmeden oyun durur, dokununca başlar
   const newLevel = Math.floor(game.score / 100) + 1;
   if (newLevel !== game.level) {
-    game.level = newLevel;
+    pendingLevel = newLevel;
+
+    // HUD/renk vb. yeni level gözüksün diye şimdi set ediyoruz,
+    // ama oyun LEVELPAUSE ile duracak.
+    game.level = pendingLevel;
 
     levelUpText = `LEVEL ${game.level}!`;
     levelUpTimer = 1500;
@@ -350,8 +384,14 @@ function updateGame(p){
       levelUpSound.play().catch(()=>{});
     }
 
-    // ✅ Yeni level'a sağ alt köşeye kayarak başla
+    // ✅ Yeni level'a sağ alt köşeye kayarak hazırlan
     startSmoothSnapToBottomRight(p);
+
+    // ✅ OYUNU DURDUR
+    pauseStartMs = p.millis();
+    state = "LEVELPAUSE";
+
+    return; // çarpışma vs. çalışmasın
   }
 
   // Shark rotation: odd cw, even ccw + speed up
@@ -453,6 +493,22 @@ function renderGameOver(p){
   p.textSize(22*scaleFactor);
   p.text(`Best: ${formatTime(bestTime)}`, p.width/2, p.height/2 + 5*scaleFactor);
   p.text("Tekrar denemek için dokun", p.width/2, p.height/2 + 45*scaleFactor);
+  p.pop();
+}
+
+function renderLevelPauseOverlay(p){
+  p.push();
+  p.fill(0,0,0,170);
+  p.rect(0,0,p.width,p.height);
+
+  p.fill(255);
+  p.textAlign(p.CENTER,p.CENTER);
+
+  p.textSize(56*scaleFactor);
+  p.text(`LEVEL ${game.level}`, p.width/2, p.height/2 - 20*scaleFactor);
+
+  p.textSize(22*scaleFactor);
+  p.text("Devam etmek için dokun", p.width/2, p.height/2 + 40*scaleFactor);
   p.pop();
 }
 
@@ -635,7 +691,5 @@ function lerp(a, b, t){ return a + (b - a) * t; }
 
 </body>
 </html>
-
-
 
 
