@@ -161,4 +161,543 @@ let snapActive = false;
 let snapStartMs = 0;
 let snapDurMs = 220;
 let snapFromX = 0, snapFromY = 0;
-let snapToX = 0, snapToY =
+let snapToX = 0, snapToY = 0;
+
+function startGame(){
+  new p5(p => {
+    p.preload = () => {
+      bgImg      = p.loadImage("assets/background.jpg?v=2");
+      catImg     = p.loadImage("assets/cat.png?v=2");
+      sharkImg   = p.loadImage("assets/shark.png?v=2");
+      levelUpImg = p.loadImage("assets/levelup.png?v=1");
+
+      levelUpSound = new Audio("assets/levelup.mp3");
+      levelUpSound.volume = 0.8;
+
+      pingSound = new Audio("assets/ping.mp3");
+      pingSound.volume = 0.9;
+
+      hitSound = new Audio("assets/hit.mp3");
+      hitSound.volume = 0.9;
+    };
+
+    p.setup = () => {
+      p.createCanvas(p.windowWidth, p.windowHeight);
+      p.imageMode(p.CENTER);
+      p.angleMode(p.RADIANS);
+      resetAll(p);
+    };
+
+    p.windowResized = () => {
+      p.resizeCanvas(p.windowWidth, p.windowHeight);
+      resetAll(p, true);
+    };
+
+    p.draw = () => {
+      renderBackground(p);
+
+      if (state === "START") {
+        renderStartScreen(p);
+        return;
+      }
+      if (state === "GAMEOVER") {
+        renderGameOver(p);
+        return;
+      }
+
+      if (state === "LEVELPAUSE") {
+        renderGame(p);
+        renderCenterTarget(p);
+        renderHUD(p);
+        renderLevelPauseOverlay(p);
+        renderLevelUpAnim(p);
+        return;
+      }
+
+      updateGame(p);
+      renderGame(p);
+      renderCenterTarget(p);
+      renderHUD(p);
+      renderLevelUpAnim(p);
+    };
+
+    p.mousePressed = p.touchStarted = () => {
+      if (state === "START") {
+        const spawn = getBottomRightSpawn(p);
+        player.x = spawn.x;
+        player.y = spawn.y;
+
+        // ✅ sesler için user gesture zaten bu tık
+        // küçük güvence: ping'i "unlock" et
+        if (pingSound) { pingSound.play().then(()=>{ pingSound.pause(); pingSound.currentTime=0; }).catch(()=>{}); }
+
+        inputLockUntilMs = p.millis() + 250;
+
+        startTime = p.millis();
+        elapsedTime = 0;
+        state = "PLAYING";
+        return false;
+      }
+
+      if (state === "LEVELPAUSE") {
+        const paused = p.millis() - pauseStartMs;
+        startTime += paused;
+
+        inputLockUntilMs = p.millis() + 250;
+        state = "PLAYING";
+        return false;
+      }
+
+      if (state === "GAMEOVER") {
+        resetAll(p);
+        state = "START";
+        return false;
+      }
+
+      return false;
+    };
+  });
+}
+
+/* ✅ Cat her zaman sağ alt köşeden spawn */
+function getBottomRightSpawn(p){
+  return {
+    x: p.width  - player.r - 24 * scaleFactor,
+    y: p.height - player.r - 24 * scaleFactor
+  };
+}
+
+function getMouthRadii(){
+  return {
+    innerR: shark.w * MOUTH_INNER_RATIO,
+    outerR: shark.w * MOUTH_OUTER_RATIO
+  };
+}
+
+function resetAll(p, keepState=false){
+  scaleFactor = Math.min(p.width, p.height) / 700;
+
+  game.score = 0;
+  game.lives = 3;
+  game.level = 1;
+
+  pendingLevel = 1;
+  pauseStartMs = 0;
+
+  CAT_SIZE = 160 * scaleFactor;
+  player.r = CAT_SIZE * 0.55;
+
+  const spawn = getBottomRightSpawn(p);
+  player.x = spawn.x;
+  player.y = spawn.y;
+
+  shark.w = shark.h = 520 * scaleFactor;
+  shark.x = p.width * 0.5;
+  shark.y = p.height * 0.5;
+
+  shark.angle = -0.3;
+  shark.gapAngle = shark.angle;
+  shark.gapSize = 1.25;
+
+  TARGET_R = 18 * scaleFactor;
+
+  bestTime = parseInt(localStorage.getItem(BEST_TIME_KEY) || "0", 10);
+
+  startTime = p.millis();
+  elapsedTime = 0;
+
+  levelUpTimer = 0;
+  levelUpText = "";
+
+  inMouth = false;
+  scoredThisEntry = false;
+
+  snapActive = false;
+  inputLockUntilMs = p.millis() + 120;
+
+  if (!keepState) state = "START";
+}
+
+function renderBackground(p){
+  if (!bgImg) { p.background(0); return; }
+
+  const cw = p.width, ch = p.height;
+  const iw = bgImg.width, ih = bgImg.height;
+  const cr = cw/ch, ir = iw/ih;
+
+  let dw, dh;
+  if (ir > cr) { dh = ch; dw = dh * ir; }
+  else { dw = cw; dh = dw / ir; }
+
+  p.image(bgImg, cw/2, ch/2, dw, dh);
+}
+
+function updateGame(p){
+  // Player follow OR smooth snap
+  if (!snapActive) {
+    if (p.millis() >= inputLockUntilMs) {
+      const tx = (p.touches && p.touches.length ? p.touches[0].x : p.mouseX) + TOUCH_X_OFFSET;
+      const ty = (p.touches && p.touches.length ? p.touches[0].y : p.mouseY);
+
+      player.x = lerp(player.x, clamp(tx, player.r, p.width - player.r), 0.25);
+      player.y = lerp(player.y, clamp(ty, player.r, p.height - player.r), 0.25);
+    }
+  } else {
+    const t = (p.millis() - snapStartMs) / snapDurMs;
+    const e = easeOutCubic(t);
+    player.x = lerp(snapFromX, snapToX, e);
+    player.y = lerp(snapFromY, snapToY, e);
+    if (t >= 1) snapActive = false;
+  }
+
+  // Time
+  elapsedTime = Math.floor((p.millis() - startTime) / 1000);
+
+  // ✅ Mouth entry/exit (ağız boşluğu)
+  const insideMouthNow = isInsideMouthCavity(player.x, player.y, player.r);
+
+  if (!inMouth && insideMouthNow) { inMouth = true; scoredThisEntry = false; }
+  if ( inMouth && !insideMouthNow) { inMouth = false; scoredThisEntry = false; }
+
+  // ✅ Score only: ağız içindeyken target'a 1 kere dokununca +10
+  if (inMouth && !scoredThisEntry) {
+    if (isTouchingTarget(player.x, player.y, player.r)) {
+      game.score += 10;
+      scoredThisEntry = true;
+
+      if (pingSound) {
+        pingSound.currentTime = 0;
+        pingSound.play().catch(()=>{});
+      }
+    }
+  }
+
+  // ✅ LEVEL UP: yeni level'a geçmeden oyun durur, dokununca başlar
+  const newLevel = Math.floor(game.score / 100) + 1;
+  if (newLevel !== game.level) {
+    pendingLevel = newLevel;
+    game.level = pendingLevel;
+
+    levelUpText = `LEVEL ${game.level}!`;
+    levelUpTimer = 1500;
+
+    if (levelUpSound) {
+      levelUpSound.currentTime = 0;
+      levelUpSound.play().catch(()=>{});
+    }
+
+    startSmoothSnapToBottomRight(p);
+
+    pauseStartMs = p.millis();
+    state = "LEVELPAUSE";
+    return;
+  }
+
+  // Shark rotation
+  const dir = (game.level % 2 === 1) ? 1 : -1;
+  const baseSpeed = 0.008;
+  const speedPerLevel = 0.0035;
+  shark.angle += (baseSpeed + (game.level - 1) * speedPerLevel) * dir;
+  shark.gapAngle = shark.angle;
+
+  // Level up timer
+  if (levelUpTimer > 0) levelUpTimer = Math.max(0, levelUpTimer - (1000/60));
+
+  // Collision
+  if (isCollidingWithSharkMouth(player.x, player.y, player.r)) {
+    loseLife();
+  }
+}
+
+function renderGame(p){
+  if (sharkImg) {
+    p.push();
+    p.translate(shark.x, shark.y);
+    p.rotate(shark.angle);
+    p.image(sharkImg, 0, 0, shark.w, shark.h);
+    p.pop();
+  }
+
+  if (catImg) {
+    p.image(catImg, player.x, player.y, CAT_SIZE, CAT_SIZE);
+  }
+}
+
+function renderCenterTarget(p){
+  p.push();
+
+  const ctx = p.drawingContext;
+  ctx.save();
+  ctx.shadowBlur = 18 * scaleFactor;
+  ctx.shadowColor = `rgba(255,255,255,${inMouth ? 0.7 : 0.35})`;
+
+  const touching = (inMouth && !scoredThisEntry && isTouchingTarget(player.x, player.y, player.r));
+
+  p.noStroke();
+  if (touching) p.fill(0, 255, 120, 230);
+  else p.fill(255, 255, 255, inMouth ? 200 : 120);
+  p.circle(shark.x, shark.y, TARGET_R * 2);
+
+  p.fill(255, 215, 0, inMouth ? 200 : 120);
+  p.circle(shark.x, shark.y, TARGET_R * 0.9);
+
+  ctx.restore();
+  p.pop();
+}
+
+function renderHUD(p){
+  const hue = (game.level * 35) % 360;
+  const col = hslToRgbCss(hue, 90, 60);
+
+  p.push();
+  p.fill(col);
+  p.noStroke();
+  p.textAlign(p.LEFT, p.TOP);
+  p.textSize(18 * scaleFactor);
+
+  p.text(`Level: ${game.level}`, 16, 14);
+  p.text(`Score: ${game.score}`, 16, 38);
+  p.text(`Lives: ${game.lives}`, 16, 62);
+  p.text(`Time: ${formatTime(elapsedTime)}`, 16, 86);
+  p.text(`Best: ${formatTime(bestTime)}`, 16, 110);
+
+  p.pop();
+}
+
+function renderStartScreen(p){
+  p.push();
+  p.fill(0,0,0,160);
+  p.rect(0,0,p.width,p.height);
+
+  p.fill(255);
+  p.textAlign(p.CENTER,p.CENTER);
+  p.textSize(46*scaleFactor);
+  p.text("Behlul & Inci", p.width/2, p.height/2 - 40*scaleFactor);
+
+  p.textSize(22*scaleFactor);
+  p.text("Başlamak için dokun", p.width/2, p.height/2 + 25*scaleFactor);
+  p.pop();
+}
+
+function renderGameOver(p){
+  p.push();
+  p.fill(0,0,0,170);
+  p.rect(0,0,p.width,p.height);
+
+  p.fill(255);
+  p.textAlign(p.CENTER,p.CENTER);
+  p.textSize(42*scaleFactor);
+  p.text("GAME OVER", p.width/2, p.height/2 - 35*scaleFactor);
+
+  p.textSize(22*scaleFactor);
+  p.text(`Best: ${formatTime(bestTime)}`, p.width/2, p.height/2 + 5*scaleFactor);
+  p.text("Tekrar denemek için dokun", p.width/2, p.height/2 + 45*scaleFactor);
+  p.pop();
+}
+
+function renderLevelPauseOverlay(p){
+  p.push();
+  p.fill(0,0,0,170);
+  p.rect(0,0,p.width,p.height);
+
+  p.fill(255);
+  p.textAlign(p.CENTER,p.CENTER);
+
+  p.textSize(56*scaleFactor);
+  p.text(`LEVEL ${game.level}`, p.width/2, p.height/2 - 20*scaleFactor);
+
+  p.textSize(22*scaleFactor);
+  p.text("Devam etmek için dokun", p.width/2, p.height/2 + 40*scaleFactor);
+  p.pop();
+}
+
+function renderLevelUpAnim(p){
+  if (levelUpTimer <= 0) return;
+
+  const DURATION = 1500;
+  const t = levelUpTimer / DURATION;
+  const fade = 1 - Math.pow(1 - t, 2);
+  const alpha = Math.floor(255 * fade);
+
+  const bigSize = Math.max(p.width, p.height) * 1.15;
+
+  const ctx = p.drawingContext;
+  const glowStrength = 40 * scaleFactor;
+  const glowColor = `rgba(255, 255, 255, ${0.55 * fade})`;
+
+  p.push();
+  p.translate(p.width/2, p.height/2);
+
+  if (levelUpImg) {
+    ctx.save();
+    ctx.shadowBlur = glowStrength;
+    ctx.shadowColor = glowColor;
+
+    p.tint(255, Math.floor(90 * fade));
+    p.image(levelUpImg, 0, 0, bigSize * 1.06, bigSize * 1.06);
+    p.image(levelUpImg, 0, 0, bigSize * 1.03, bigSize * 1.03);
+
+    p.tint(255, alpha);
+    p.image(levelUpImg, 0, 0, bigSize, bigSize);
+    p.noTint();
+
+    ctx.restore();
+  }
+
+  const gold = p.color(255, 215, 0, alpha);
+  ctx.save();
+  ctx.shadowBlur = 28 * scaleFactor;
+  ctx.shadowColor = `rgba(255, 215, 0, ${0.85 * fade})`;
+
+  p.fill(gold);
+  p.noStroke();
+  p.textAlign(p.CENTER, p.CENTER);
+  p.textSize(64 * scaleFactor);
+  p.text(levelUpText, 0, 0);
+
+  ctx.restore();
+  p.pop();
+}
+
+function loseLife(){
+  if (loseLife._lock) return;
+  loseLife._lock = true;
+
+  if (hitSound) {
+    hitSound.currentTime = 0;
+    hitSound.play().catch(()=>{});
+  }
+
+  game.lives -= 1;
+  setTimeout(() => { loseLife._lock = false; }, 500);
+
+  if (game.lives <= 0) {
+    if (elapsedTime > bestTime) {
+      bestTime = elapsedTime;
+      localStorage.setItem(BEST_TIME_KEY, String(bestTime));
+    }
+    state = "GAMEOVER";
+  }
+}
+
+/* ==========================
+   ✅ NEW LOGIC:
+   - Ağız içi = cavity (innerR)
+   - Skor = cavity içindeyken hedefe dokun
+   - Çarpışma = ring bölgesinde gap dışında kalırsan
+   ========================== */
+
+function isInsideMouthCavity(px, py, pr){
+  const dx = px - shark.x;
+  const dy = py - shark.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  const { innerR } = getMouthRadii();
+
+  // ✅ herhangi bir parça iç boşluğa girerse true
+  return (dist - pr) <= innerR;
+}
+
+function isTouchingTarget(px, py, pr){
+  const dx = px - shark.x;
+  const dy = py - shark.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  return dist <= (pr + TARGET_R);
+}
+
+function isCollidingWithSharkMouth(px, py, pr){
+  const dx = px - shark.x;
+  const dy = py - shark.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+
+  const { innerR, outerR } = getMouthRadii();
+
+  // ✅ Cat ağız boşluğunun içindeyse çarpışma yok
+  if ((dist - pr) <= innerR) return false;
+
+  // Ring bölgesinde mi?
+  const withinRing = (dist + pr >= innerR) && (dist - pr <= outerR);
+  if (!withinRing) return false;
+
+  // Gap kontrolü
+  const ang = Math.atan2(dy, dx);
+  const a0 = normalizeAngle(shark.gapAngle - shark.gapSize/2);
+  const a1 = normalizeAngle(shark.gapAngle + shark.gapSize/2);
+
+  const inGap = isAngleBetween(ang, a0, a1);
+
+  // Gap'in DIŞINDA ise ağız etine çarpar
+  return !inGap;
+}
+
+/* ✅ Level up olduğunda sağ alt köşeye smooth kay */
+function startSmoothSnapToBottomRight(p){
+  const spawn = getBottomRightSpawn(p);
+
+  snapFromX = player.x;
+  snapFromY = player.y;
+
+  snapToX = spawn.x;
+  snapToY = spawn.y;
+
+  snapActive = true;
+  snapStartMs = p.millis();
+
+  inMouth = false;
+  scoredThisEntry = false;
+
+  inputLockUntilMs = p.millis() + 220;
+}
+
+function easeOutCubic(t){
+  t = clamp(t, 0, 1);
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function normalizeAngle(a){
+  while (a < -Math.PI) a += Math.PI*2;
+  while (a >  Math.PI) a -= Math.PI*2;
+  return a;
+}
+
+function isAngleBetween(a, start, end){
+  a = normalizeAngle(a);
+  start = normalizeAngle(start);
+  end = normalizeAngle(end);
+
+  if (start <= end) return (a >= start && a <= end);
+  return (a >= start || a <= end);
+}
+
+function formatTime(seconds){
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m.toString().padStart(2,"0")}:${s.toString().padStart(2,"0")}`;
+}
+
+function hslToRgbCss(h, s, l){
+  s /= 100; l /= 100;
+  const c = (1 - Math.abs(2*l - 1)) * s;
+  const x = c * (1 - Math.abs(((h/60) % 2) - 1));
+  const m = l - c/2;
+
+  let r=0,g=0,b=0;
+  if (0 <= h && h < 60) { r=c; g=x; b=0; }
+  else if (60 <= h && h < 120) { r=x; g=c; b=0; }
+  else if (120 <= h && h < 180) { r=0; g=c; b=x; }
+  else if (180 <= h && h < 240) { r=0; g=x; b=c; }
+  else if (240 <= h && h < 300) { r=x; g=0; b=c; }
+  else { r=c; g=0; b=x; }
+
+  r = Math.round((r+m)*255);
+  g = Math.round((g+m)*255);
+  b = Math.round((b+m)*255);
+  return `rgb(${r},${g},${b})`;
+}
+
+function clamp(v, mn, mx){ return Math.max(mn, Math.min(mx, v)); }
+function lerp(a, b, t){ return a + (b - a) * t; }
+</script>
+
+</body>
+</html>
+
